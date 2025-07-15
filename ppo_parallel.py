@@ -39,7 +39,7 @@ lmbda = 0.95
 entropy_eps = 1e-4
 
 # Parallel environment setup
-num_envs = 4  # Number of parallel environments
+num_envs = 10  # Number of parallel environments
 env_name = "InvertedDoublePendulum-v4"
 
 # Function to create a single environment with transforms
@@ -50,6 +50,7 @@ def make_env(base_env=None, norm_loc=None, norm_scale=None):
             # normalize observations
             ObservationNorm(in_keys=["observation"], loc=norm_loc, scale=norm_scale),
             DoubleToFloat(),
+            StepCounter(),
         ),
     )
     return env
@@ -58,7 +59,6 @@ def make_env(base_env=None, norm_loc=None, norm_scale=None):
 # Need to put the main code in a function to avoid issues with multiprocessing (main calls itself)
 if __name__ == "__main__":
     # Check multiprocessing start method and set device accordingly
-    print(multiprocessing.get_start_method())
     is_fork = multiprocessing.get_start_method() == "fork"
     device = (
         torch.device(0)
@@ -89,8 +89,8 @@ if __name__ == "__main__":
     norm_loc = single_env.transform[0].loc.clone()
     norm_scale = single_env.transform[0].scale.clone()
 
-    # Close the single environment
-    single_env.close()
+    # # Delete the single environment
+    # single_env.close()
 
     # Create parallel environment
     env = ParallelEnv(
@@ -101,22 +101,13 @@ if __name__ == "__main__":
         # pin_memory=False,
     )
 
-    # Initialize observation normalization stats
-    # We need to collect some data first to initialize the normalization
-    print("Initializing observation normalization...")
-    with torch.no_grad():
-        init_data = env.rollout(max_steps=1000 // num_envs)  # Collect init data across parallel envs
-        
-    # Apply normalization stats to all environments
-    # Note: For parallel envs, we need to set the normalization stats for each worker
-    for i in range(num_envs):
-        env.transform(i)[0].init_stats(num_iter=1000 // num_envs, reduce_dim=0, cat_dim=0)
+    env.reset()
 
-    print("normalization constant shape:", env.get_env_transform(0)[0].loc.shape)
-    print("observation_spec:", env.observation_spec)
-    print("reward_spec:", env.reward_spec)
-    print("input_spec:", env.input_spec)
-    print("action_spec (as defined by input_spec):", env.action_spec)
+    # print("normalization constant shape:", env.get_env_transform(0)[0].loc.shape)
+    # print("observation_spec:", env.observation_spec)
+    # print("reward_spec:", env.reward_spec)
+    # print("input_spec:", env.input_spec)
+    # print("action_spec (as defined by input_spec):", env.action_spec)
 
     # Check environment specs
     check_env_specs(env)
@@ -167,8 +158,8 @@ if __name__ == "__main__":
     )
 
     # Initialize networks
-    policy_module(env.reset())
-    value_module(env.reset())
+    policy_module(env.reset().to(device))
+    value_module(env.reset().to(device))
 
     # Create data collector with parallel environment
     collector = SyncDataCollector(
@@ -213,10 +204,6 @@ if __name__ == "__main__":
     pbar = tqdm(total=total_frames)
     eval_str = ""
 
-    # Create single environment for evaluation
-    eval_env = make_env()
-    eval_env.transform[0].init_stats(num_iter=1000, reduce_dim=0, cat_dim=0)
-
     for i, tensordict_data in enumerate(collector):
         # Training loop over epochs
         for epoch in range(num_epochs):
@@ -255,7 +242,7 @@ if __name__ == "__main__":
         # Evaluation every 10 iterations
         if i % 10 == 0:
             with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
-                eval_rollout = eval_env.rollout(1000, policy_module)
+                eval_rollout = env.rollout(1000, policy_module)
                 logs["eval reward"].append(eval_rollout["next", "reward"].mean().item())
                 logs["eval reward (sum)"].append(
                     eval_rollout["next", "reward"].sum().item()
@@ -285,6 +272,7 @@ if __name__ == "__main__":
     plt.subplot(2, 2, 4)
     plt.plot(logs["eval step_count"])
     plt.title("Max step count (test)")
+    plt.text()
     plt.show()
 
     # Uncomment for video recording
