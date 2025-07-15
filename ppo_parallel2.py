@@ -30,7 +30,7 @@ num_cells = 256  # number of cells in each layer i.e. output dim.
 lr = 3e-4
 max_grad_norm = 1.0
 frames_per_batch = 1000
-total_frames = 1_00_000  # For a complete training, bring the number of frames up to 1M
+total_frames = 1_000_000  # For a complete training, bring the number of frames up to 1M
 sub_batch_size = 64  # cardinality of the sub-samples gathered from the current data in the inner loop
 num_epochs = 10  # optimization steps per batch of data collected
 clip_epsilon = 0.2  # clip value for PPO loss: see the equation in the intro for more context.
@@ -39,8 +39,9 @@ lmbda = 0.95
 entropy_eps = 1e-4
 
 # Parallel environment setup
-num_envs = 10  # Number of parallel environments
+num_envs = 5  # Number of parallel environments
 env_name = "InvertedDoublePendulum-v4"
+env_device = torch.device("cpu")  # Device for the environment
 
 # Function to create a single environment with transforms
 def make_env(base_env=None, norm_loc=None, norm_scale=None):
@@ -214,8 +215,8 @@ if __name__ == "__main__":
             
             # Mini-batch training
             for batch in range(frames_per_batch // sub_batch_size):
-                subdata = replay_buffer.sample(sub_batch_size)
-                loss_vals = loss_module(subdata.to(device))
+                subdata = replay_buffer.sample(sub_batch_size).to(device) # Sample from replay buffer and move to GPU
+                loss_vals = loss_module(subdata)
                 loss_value = (
                     loss_vals["loss_objective"]
                     + loss_vals["loss_critic"]
@@ -242,7 +243,8 @@ if __name__ == "__main__":
         # Evaluation every 10 iterations
         if i % 10 == 0:
             with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
-                eval_rollout = env.rollout(1000, policy_module)
+                single_env.to(device) # Send single_env to GPU
+                eval_rollout = single_env.rollout(1000, policy_module)
                 logs["eval reward"].append(eval_rollout["next", "reward"].mean().item())
                 logs["eval reward (sum)"].append(
                     eval_rollout["next", "reward"].sum().item()
@@ -255,7 +257,7 @@ if __name__ == "__main__":
                 )
                 del eval_rollout
         
-        pbar.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
+        #pbar.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
         scheduler.step()
 
     # Plot results
