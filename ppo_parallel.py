@@ -271,9 +271,6 @@ if __name__ == "__main__":
         pbar.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
         scheduler.step()
 
-    # Close parallel environments
-    env.close()
-
     # Plot results
     plt.figure(figsize=(10, 10))
     plt.subplot(2, 2, 1)
