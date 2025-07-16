@@ -172,7 +172,7 @@ if __name__ == "__main__":
         device=device,
     )
 
-    # Create replay buffer
+    # Create replay buffer (only used for sampling, still on-policy for PPO)
     replay_buffer = ReplayBuffer(
         storage=LazyTensorStorage(max_size=frames_per_batch),
         sampler=SamplerWithoutReplacement(),

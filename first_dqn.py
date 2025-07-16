@@ -1,6 +1,6 @@
 import torch
 import time
-from tensordict.nn import TensorDictModule as Mod, TensorDictSequential as Seq
+from tensordict.nn import TensorDictModule, TensorDictSequential
 from torchrl.envs import GymEnv, StepCounter, TransformedEnv
 from torchrl.modules import EGreedyModule, MLP, QValueModule
 from torchrl.collectors import SyncDataCollector
@@ -18,10 +18,10 @@ env.set_seed(0)
 
 # Define the policy
 value_mlp = MLP(out_features=env.action_spec.shape[-1], num_cells=[64, 64])
-value_net = Mod(value_mlp, in_keys=["observation"], out_keys=["action_value"])
-policy = Seq(value_net, QValueModule(spec=env.action_spec))
+value_net = TensorDictModule(value_mlp, in_keys=["observation"], out_keys=["action_value"])
+policy = TensorDictSequential(value_net, QValueModule(spec=env.action_spec))
 exploration_module = EGreedyModule(env.action_spec, annealing_num_steps=100_000, eps_init=0.5)
-policy_explore = Seq(policy, exploration_module)
+policy_explore = TensorDictSequential(policy, exploration_module)
 
 # Set up the collector and replay buffer
 init_rand_steps = 50000
