@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 # Hyperparameters
 num_cells = 256  # number of cells in each layer i.e. output dim.
-lr = 3e-4
+lr = 3e-5
 max_grad_norm = 1.0
 frames_per_batch = 1000
 total_frames = 1_000_000  # For a complete training, bring the number of frames up to 1M
@@ -36,7 +36,8 @@ num_epochs = 10  # optimization steps per batch of data collected
 clip_epsilon = 0.2  # clip value for PPO loss: see the equation in the intro for more context.
 gamma = 0.99
 lmbda = 0.95
-entropy_eps = 1e-4
+entropy_eps_init = 1e-3
+entropy_eps_end = 1e-5
 
 # Parallel environment setup
 num_envs = 5  # Number of parallel environments
@@ -55,6 +56,9 @@ def make_env(base_env=None, norm_loc=None, norm_scale=None):
         ),
     )
     return env
+
+def linear_annealing(start, end, total_steps, now_step):
+    return max(end, start - (start - end) * (now_step / total_steps))
 
 
 # Need to put the main code in a function to avoid issues with multiprocessing (main calls itself)
@@ -188,8 +192,8 @@ if __name__ == "__main__":
         actor_network=policy_module,
         critic_network=value_module,
         clip_epsilon=clip_epsilon,
-        entropy_bonus=bool(entropy_eps),
-        entropy_coef=entropy_eps,
+        entropy_bonus=bool(entropy_eps_init),
+        entropy_coef=entropy_eps_init,
         critic_coef=1.0,
         loss_critic_type="smooth_l1",
     )
@@ -197,7 +201,7 @@ if __name__ == "__main__":
     # Create optimizer and scheduler
     optim = torch.optim.Adam(loss_module.parameters(), lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim, total_frames // frames_per_batch, 0.0
+        optim, 700, 1e-9 #optim, total_frames // frames_per_batch, 0.0
     )
 
     # Training loop
@@ -256,8 +260,13 @@ if __name__ == "__main__":
                     f"eval step-count: {logs['eval step_count'][-1]}"
                 )
                 del eval_rollout
-        
-        #pbar.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
+
+        #print(loss_module.entropy_coef)
+        # Update entropy coefficient using linear annealing
+        new_coef = linear_annealing(entropy_eps_init, entropy_eps_end, total_frames // frames_per_batch, i+1) # Update entropy coefficient, i+1 for the next step as this is end of the current iteration
+        loss_module.entropy_coef = torch.tensor(new_coef, device=device)
+
+        pbar.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
         scheduler.step()
 
     # Plot results
