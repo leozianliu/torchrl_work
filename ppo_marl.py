@@ -39,7 +39,7 @@ vmas_device = device  # The device where the simulator is run (VMAS can run on G
 
 # Sampling
 frames_per_batch = 6_000  # Number of team frames collected per training iteration
-n_iters = 50  # Number of sampling and training iterations
+n_iters = 50 # Number of sampling and training iterations
 total_frames = frames_per_batch * n_iters
 
 # Training
@@ -57,7 +57,7 @@ entropy_eps = 1e-4  # coefficient of the entropy term in the PPO loss
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
 
-max_steps = 100  # Episode steps before done
+max_steps = 150  # Episode steps before done
 num_vmas_envs = (
     frames_per_batch // max_steps
 )  # Number of vectorized envs. frames_per_batch should be divisible by this number
@@ -88,7 +88,7 @@ env = TransformedEnv(
 )
 # check_env_specs(env)
 
-share_parameters_policy = True
+share_parameters_policy = False
 policy_net = torch.nn.Sequential(
     MultiAgentMLP(
         n_agent_inputs = env.observation_spec["agents", "observation"].shape[-1],  # n_obs_per_agent
@@ -121,8 +121,8 @@ policy = ProbabilisticActor(
     return_log_prob=True,
 )  # we'll need the log-prob for the PPO loss
 
-share_parameters_critic = True
-mappo = True  # IPPO if False
+share_parameters_critic = False
+mappo = False  # IPPO if False
 critic_net = MultiAgentMLP(
     n_agent_inputs=env.observation_spec["agents", "observation"].shape[-1],
     n_agent_outputs=1,  # 1 value per agent
@@ -246,11 +246,15 @@ plt.ylabel("Reward")
 plt.title("Episode reward mean")
 plt.show()
 
+frames = []
 with torch.no_grad():
-   env.rollout(
-       max_steps=max_steps,
-       policy=policy,
-       callback=lambda env, _: env.render(),
-       auto_cast_to_device=True,
-       break_when_any_done=False,
-   )
+    env.rollout(
+        max_steps=max_steps,
+        policy=policy,
+        callback=lambda env, *args: frames.append(env.render(mode='rgb_array')),
+        auto_cast_to_device=True,
+        break_when_any_done=False,
+    )
+# Save as video using imageio
+import imageio
+imageio.mimsave('rollout.mp4', frames, fps=30, macro_block_size=1)
