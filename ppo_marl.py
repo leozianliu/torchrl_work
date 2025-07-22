@@ -39,7 +39,7 @@ vmas_device = device  # The device where the simulator is run (VMAS can run on G
 
 # Sampling
 frames_per_batch = 6_000  # Number of team frames collected per training iteration
-n_iters = 300 # Number of sampling and training iterations
+n_iters = 50 # Number of sampling and training iterations
 total_frames = frames_per_batch * n_iters
 
 # Training
@@ -122,7 +122,7 @@ policy = ProbabilisticActor(
 )  # we'll need the log-prob for the PPO loss
 
 share_parameters_critic = False
-mappo = False  # IPPO if False
+mappo = True  # IPPO if False
 critic_net = MultiAgentMLP(
     n_agent_inputs=env.observation_spec["agents", "observation"].shape[-1],
     n_agent_outputs=1,  # 1 value per agent
@@ -246,12 +246,15 @@ plt.ylabel("Reward")
 plt.title("Episode reward mean")
 plt.show()
 
+def render_callback(env):
+    frames.append(env.render(mode='rgb_array'))
+
 frames = []
 with torch.no_grad():
     env.rollout(
         max_steps=max_steps,
         policy=policy,
-        callback=lambda env, *args: frames.append(env.render(mode='rgb_array')),
+        callback=render_callback,
         auto_cast_to_device=True,
         break_when_any_done=False,
     )
