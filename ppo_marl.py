@@ -88,7 +88,7 @@ env = TransformedEnv(
 )
 # check_env_specs(env)
 
-share_parameters_policy = False
+share_parameters_policy = True
 policy_net = torch.nn.Sequential(
     MultiAgentMLP(
         n_agent_inputs = env.observation_spec["agents", "observation"].shape[-1],  # n_obs_per_agent
@@ -121,8 +121,8 @@ policy = ProbabilisticActor(
     return_log_prob=True,
 )  # we'll need the log-prob for the PPO loss
 
-share_parameters_critic = False
-mappo = False  # IPPO if False
+share_parameters_critic = True
+mappo = True  # IPPO if False
 critic_net = MultiAgentMLP(
     n_agent_inputs=env.observation_spec["agents", "observation"].shape[-1],
     n_agent_outputs=1,  # 1 value per agent
