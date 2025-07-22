@@ -57,6 +57,7 @@ def make_env(base_env=None, norm_loc=None, norm_scale=None):
     )
     return env
 
+# Update entropy coefficient using linear annealing
 def linear_annealing(start, end, total_steps, now_step):
     return max(end, start - (start - end) * (now_step / total_steps))
 
