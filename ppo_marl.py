@@ -246,7 +246,7 @@ plt.ylabel("Reward")
 plt.title("Episode reward mean")
 plt.show()
 
-def render_callback(env):
+def render_callback(env, *_):
     frames.append(env.render(mode='rgb_array'))
 
 frames = []
