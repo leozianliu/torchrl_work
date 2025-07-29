@@ -45,7 +45,7 @@ total_frames = frames_per_batch * n_iters
 # Training
 num_epochs = 10  # Number of optimization steps per training iteration
 minibatch_size = 800  # Size of the mini-batches in each optimization step
-lr = 3e-4  # Learning rate
+lr = 3e-5  # Learning rate
 max_grad_norm = 1.0  # Maximum norm for the gradients
 
 # PPO
@@ -250,7 +250,7 @@ plt.plot(episode_reward_mean_list)
 plt.xlabel("Training iterations")
 plt.ylabel("Reward")
 plt.title("Episode reward mean")
-plt.show()
+plt.savefig("andong_idea/results/teacher.png")
 
 def render_callback(env, *_):
     frames.append(env.render(mode='rgb_array'))

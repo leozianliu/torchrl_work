@@ -52,8 +52,8 @@ max_grad_norm = 1.0  # Maximum norm for the gradients
 clip_epsilon = 0.2  # clip value for PPO loss
 gamma = 0.99  # discount factor
 lmbda = 0.9  # lambda for generalised advantage estimation
-entropy_eps = 3e-3
-entropy_eps_end = 3e-5
+entropy_eps = 3e-4
+entropy_eps_end = 3e-4
 
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
@@ -259,7 +259,7 @@ plt.plot(episode_reward_mean_list)
 plt.xlabel("Training iterations")
 plt.ylabel("Reward")
 plt.title("Episode reward mean")
-plt.show()
+plt.savefig("andong_idea/results/mappo.png")
 
 def render_callback(env, *_):
     frames.append(env.render(mode='rgb_array'))
