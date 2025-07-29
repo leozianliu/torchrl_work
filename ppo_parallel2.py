@@ -214,6 +214,8 @@ if __name__ == "__main__":
         # Training loop over epochs
         for epoch in range(num_epochs):
             # Compute advantage
+            # We re-compute it at each epoch as its value depends on the value
+            # network which is updated in the inner loop.
             advantage_module(tensordict_data)
             data_view = tensordict_data.reshape(-1)
             replay_buffer.extend(data_view.cpu())
