@@ -4,7 +4,7 @@ import torch
 # Tensordict modules
 from tensordict.nn import set_composite_lp_aggregate, TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
-from torch import multiprocessing
+from torch import multiprocessing, nn
 
 # Data collection
 from torchrl.collectors import SyncDataCollector
@@ -38,13 +38,13 @@ device = (
 vmas_device = device  # The device where the simulator is run (VMAS can run on GPU)
 
 # Sampling
-frames_per_batch = 6_000  # Number of team frames collected per training iteration
+frames_per_batch = 8_000  # Number of team frames collected per training iteration
 n_iters = 50 # Number of sampling and training iterations
 total_frames = frames_per_batch * n_iters
 
 # Training
-num_epochs = 30 # Number of optimization steps per training iteration
-minibatch_size = 400  # Size of the mini-batches in each optimization step
+num_epochs = 10  # Number of optimization steps per training iteration
+minibatch_size = 800  # Size of the mini-batches in each optimization step
 lr = 3e-4  # Learning rate
 max_grad_norm = 1.0  # Maximum norm for the gradients
 
@@ -52,12 +52,12 @@ max_grad_norm = 1.0  # Maximum norm for the gradients
 clip_epsilon = 0.2  # clip value for PPO loss
 gamma = 0.99  # discount factor
 lmbda = 0.9  # lambda for generalised advantage estimation
-entropy_eps = 1e-4  # coefficient of the entropy term in the PPO loss
+entropy_eps = 1e-3  # coefficient of the entropy term in the PPO loss
 
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
 
-max_steps = 200  # Episode steps before done
+max_steps = 400  # Episode steps before done
 num_vmas_envs = (
     frames_per_batch // max_steps
 )  # Number of vectorized envs. frames_per_batch should be divisible by this number
@@ -90,20 +90,25 @@ env = TransformedEnv(
 )
 # check_env_specs(env)
 
-share_parameters_policy = True
-policy_net = torch.nn.Sequential(
-    MultiAgentMLP(
-        n_agent_inputs = env.observation_spec["agents", "observation"].shape[-1],  # n_obs_per_agent
-        n_agent_outputs = 2 * env.full_action_spec[env.action_key].shape[-1],  # 2 * n_actions_per_agents
-        n_agents = env.n_agents,
-        centralised = False,  # the policies are decentralised (ie each agent will act from its observation)
-        share_params = share_parameters_policy,
-        device = device,
-        depth = 2,
-        num_cells = 256,
-        activation_class = torch.nn.Tanh,
-    ),
-    NormalParamExtractor(),  # this will just separate the last dimension into two outputs: a loc and a non-negative scale
+num_cells = 256
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.shape[0], -1)
+
+class Unflatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.shape[0], env.n_agents, -1)
+policy_net = nn.Sequential(
+    Flatten(), # flatten input from [batch_size, n_agents, observation_dim] to [batch_size, observation_dim * n_agents]
+    nn.Linear(env.observation_spec["agents", "observation"].shape[-1] * env.n_agents, num_cells, device=device),
+    nn.Tanh(),
+    nn.Linear(num_cells, num_cells, device=device),
+    nn.Tanh(),
+    nn.Linear(num_cells, num_cells, device=device),
+    nn.Tanh(),
+    nn.Linear(num_cells, 2 * env.full_action_spec[env.action_key].shape[-1] * env.n_agents, device=device),
+    Unflatten(), # unflatten to [batch_size, n_agents, observation_dim]
+    NormalParamExtractor(),
 )
 policy_module = TensorDictModule(
     policy_net,
@@ -123,14 +128,12 @@ policy = ProbabilisticActor(
     return_log_prob=True,
 )  # we'll need the log-prob for the PPO loss
 
-share_parameters_critic = True
-mappo = True  # IPPO if False
 critic_net = MultiAgentMLP(
     n_agent_inputs=env.observation_spec["agents", "observation"].shape[-1],
     n_agent_outputs=1,  # 1 value per agent
     n_agents=env.n_agents,
-    centralised=mappo,
-    share_params=share_parameters_critic,
+    centralised=True,
+    share_params=True,
     device=device,
     depth=2,
     num_cells=256,
@@ -142,8 +145,9 @@ critic = TensorDictModule(
     out_keys=[("agents", "state_value")],
 )
 # print("Running policy:", policy(env.reset()))
-# print("Running value:", critic(env.reset())[""])
+# print("Running value:", critic(env.reset()))
 # print(env.reward_key)
+
 
 collector = SyncDataCollector(
     env,
@@ -262,4 +266,4 @@ with torch.no_grad():
     )
 # Save as video using imageio
 import imageio
-imageio.mimsave('rollout.mp4', frames, fps=30, macro_block_size=1)
+imageio.mimsave('andong_idea/results/teacher_rollout.mp4', frames, fps=30, macro_block_size=1)

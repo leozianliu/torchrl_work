@@ -38,12 +38,12 @@ device = (
 vmas_device = device  # The device where the simulator is run (VMAS can run on GPU)
 
 # Sampling
-frames_per_batch = 6_000  # Number of team frames collected per training iteration
+frames_per_batch = 8_000  # Number of team frames collected per training iteration
 n_iters = 50 # Number of sampling and training iterations
 total_frames = frames_per_batch * n_iters
 
 # Training
-num_epochs = 30 # Number of optimization steps per training iteration
+num_epochs = 30  # Number of optimization steps per training iteration
 minibatch_size = 400  # Size of the mini-batches in each optimization step
 lr = 3e-4  # Learning rate
 max_grad_norm = 1.0  # Maximum norm for the gradients
@@ -52,12 +52,13 @@ max_grad_norm = 1.0  # Maximum norm for the gradients
 clip_epsilon = 0.2  # clip value for PPO loss
 gamma = 0.99  # discount factor
 lmbda = 0.9  # lambda for generalised advantage estimation
-entropy_eps = 1e-4  # coefficient of the entropy term in the PPO loss
+entropy_eps = 3e-3
+entropy_eps_end = 3e-5
 
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
 
-max_steps = 200  # Episode steps before done
+max_steps = 400  # Episode steps before done
 num_vmas_envs = (
     frames_per_batch // max_steps
 )  # Number of vectorized envs. frames_per_batch should be divisible by this number
@@ -144,6 +145,7 @@ critic = TensorDictModule(
 # print("Running policy:", policy(env.reset()))
 # print("Running value:", critic(env.reset())[""])
 # print(env.reward_key)
+print(critic)
 
 collector = SyncDataCollector(
     env,
@@ -182,11 +184,18 @@ loss_module.make_value_estimator(ValueEstimators.GAE, gamma=gamma, lmbda=lmbda) 
 GAE = loss_module.value_estimator
 
 optim = torch.optim.Adam(loss_module.parameters(), lr)
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+#         optim, total_frames // frames_per_batch, 0.0
+# )
+
+# Update entropy coefficient using linear annealing
+def linear_annealing(start, end, total_steps, now_step):
+    return max(end, start - (start - end) * (now_step / total_steps))
 
 pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
 
 episode_reward_mean_list = []
-for tensordict_data in collector:
+for i, tensordict_data in enumerate(collector):
     tensordict_data.set(
         ("next", "agents", "done"),
         tensordict_data.get(("next", "done"))
@@ -232,6 +241,10 @@ for tensordict_data in collector:
             optim.zero_grad()
 
     collector.update_policy_weights_()
+    
+    # Update entropy coefficient using linear annealing
+    new_coef = linear_annealing(entropy_eps, entropy_eps_end, total_frames // frames_per_batch, i+1) # Update entropy coefficient, i+1 for the next step as this is end of the current iteration
+    loss_module.entropy_coef = torch.tensor(new_coef, device=device)
 
     # Logging
     done = tensordict_data.get(("next", "agents", "done"))
@@ -254,7 +267,7 @@ def render_callback(env, *_):
 frames = []
 with torch.no_grad():
     env.rollout(
-        max_steps=max_steps,
+        max_steps=500,
         policy=policy,
         callback=render_callback,
         auto_cast_to_device=True,
@@ -262,4 +275,4 @@ with torch.no_grad():
     )
 # Save as video using imageio
 import imageio
-imageio.mimsave('rollout.mp4', frames, fps=30, macro_block_size=1)
+imageio.mimsave('andong_idea/results/mappo_rollout.mp4', frames, fps=30, macro_block_size=1)
