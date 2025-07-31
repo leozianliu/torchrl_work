@@ -1,3 +1,4 @@
+# Teacher but with a value function for each agent
 # Torch
 import torch
 
@@ -49,7 +50,7 @@ lr = 3e-5  # Learning rate
 max_grad_norm = 1.0  # Maximum norm for the gradients
 
 # PPO
-clip_epsilon = 0.2  # clip value for PPO loss
+clip_epsilon = 0.1  # clip value for PPO loss
 gamma = 0.99  # discount factor
 lmbda = 0.9  # lambda for generalised advantage estimation
 entropy_eps = 1e-3  # coefficient of the entropy term in the PPO loss

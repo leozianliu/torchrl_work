@@ -1,3 +1,4 @@
+# Teacher but with a scalar value function
 # Torch
 import torch
 
@@ -49,7 +50,7 @@ lr = 3e-4  # Learning rate
 max_grad_norm = 1.0  # Maximum norm for the gradients
 
 # PPO
-clip_epsilon = 0.2  # clip value for PPO loss
+clip_epsilon = 0.1  # clip value for PPO loss
 gamma = 0.99  # discount factor
 lmbda = 0.9  # lambda for generalised advantage estimation
 entropy_eps = 3e-4
@@ -203,7 +204,7 @@ advantage_module = value.GAE(
     average_gae=True
 )
 advantage_module.set_keys(
-    reward=("team_reward"),  # Use the summed rewards
+    reward=("next", "team_reward"),  # Use the summed rewards
     value=("state_value"),
     done=("agents", "done"),
     terminated=("agents", "terminated"),
@@ -227,15 +228,15 @@ for tensordict_data in collector:
         .unsqueeze(-1)
         .expand(tensordict_data.get_item_shape(("next", env.reward_key))),
     ) # We need to expand the done and terminated to match the reward shape (this is expected by the value estimator)
+    
     # Sum rewards across agents and store as 'team_reward'
-    print(tensordict_data)
-    tensordict_data.set(
-        "team_reward",
-        tensordict_data.get(("next", "reward")).mean(2, keepdim=True)
-    )
+    # Compute team reward (mean across agents) and store it in next
+    team_reward = tensordict_data.get(("next", "agents", "reward")).mean(dim=-2, keepdim=True)
+    tensordict_data.set(("next", "team_reward"), team_reward)
+
     advantage_module(tensordict_data)
     data_view = tensordict_data.reshape(-1)
-    replay_buffer.extend(data_view.cpu())
+    replay_buffer.extend(data_view)
 
     for _ in range(num_epochs):        
         for _ in range(frames_per_batch // minibatch_size):
