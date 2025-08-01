@@ -204,7 +204,7 @@ class MultiRobotEnv(gym.Env):
         
         self.num_robots = num_robots
         self.robots = []
-        self.num_obstacles = 100
+        self.num_obstacles = 500
         self.obstacles_size_range = (4, 12)
         self.enable_obstacle_check = enable_obstacle_check
         self.robot_configs = None
@@ -249,15 +249,24 @@ class MultiRobotEnv(gym.Env):
             # Use stored robot configurations
             for robot_id, config in enumerate(self.robot_configs):
                 if len(config) == 5:
+                    print(f'Robot {robot_id} using fixed type, position, and goal')
                     robot_type, pos, goal, battery_limit, comm_range = config
                 elif len(config) == 4:
+                    print(f'Robot {robot_id} using fixed type, position, and goal')
                     robot_type, pos, goal, battery_limit = config
                     comm_range = 20.0
                 elif len(config) == 3:
+                    print(f'Robot {robot_id} using fixed type, position, and goal')
                     robot_type, pos, goal = config
                     battery_limit = default_battery_limit
                     comm_range = default_comm_range
-                elif 
+                elif len(config) == 1:
+                    print(f'Robot {robot_id} using config defined fixed type, random position and goal')
+                    robot_type = config
+                    pos = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32) # Randomly generated position
+                    goal = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32) # Randomly generated goal
+                    battery_limit = default_battery_limit
+                    comm_range = default_comm_range
                 else:
                     raise ValueError("Invalid robot configuration length")
                 if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
@@ -280,12 +289,13 @@ class MultiRobotEnv(gym.Env):
                                          battery_limit=battery_limit, 
                                          comm_range=comm_range))
         elif (reset_options is not None) and reset_options != {}:
-            print('Using fixed type, random position and goal')
+            print('Using hardcoded fixed type, random position and goal for demo')
             for robot_id in range(self.num_robots):
                 rand_init_pos = np.array([rng.randint(0, MAP_SIZE[0]), 
                                     rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
                 rand_goal = np.array([rng.randint(0, MAP_SIZE[0]), 
                                     rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
+                # Again, let's allow the goals to be placed on obstacles. After all, life can't be too easy
                 robot_type = 'UAV' if robot_id == 2 else 'UGV'
                 
                 if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
@@ -307,7 +317,7 @@ class MultiRobotEnv(gym.Env):
                                          battery_limit=default_battery_limit, 
                                          comm_range=default_comm_range))
         else:
-            print('Using default type, pos, and random goals for demo.')
+            print('Using hardcoded type and pos, random goals for demo.')
             init_positions = [(10, 10), (20, 20), (50, 20)]
             rand_goals = []
             for robot_id in range(self.num_robots):
