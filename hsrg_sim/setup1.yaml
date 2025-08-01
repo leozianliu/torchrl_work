@@ -1,7 +1,36 @@
-Format:
+# Format:
 
-General inputs
-Goals
-Initial positions
-Robot parameters
-Obstacle parameters
+# General inputs
+# Goals
+# Initial positions
+# Robot parameters
+# Obstacle parameters
+
+general_inputs:
+  map_size: [300, 300]
+  num_robots: 5 # Due to testing, this needs to be hardcoded for now
+  num_obstacles: 300
+  obstacles_size_range: [4, 12] # Range of obstacle sizes
+  load_which_robot_configs: 0 # 0 for this yaml, 1 for demo with random pos and goal, 2 for demo with fixed pos and goal
+
+robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
+  - #id: 0
+    type: 'UGV'
+    initial_position: [10, 10]
+    goal: [90, 90]
+    battery_limit: 100.0
+    communication_range: 20.0
+  - #id: 1
+    type: 'UGV'
+    initial_position: [20, 20]
+    goal: [80, 80]
+    battery_limit: 100.0
+    communication_range: 20.0
+  - #id: 2
+    type: 'UAV'
+    initial_position: [30, 30]
+    goal: [70, 70]
+  - #id: 3
+    type: 'UGV'
+  - #id: 4
+    type: 'UGV'
