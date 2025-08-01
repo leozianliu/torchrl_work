@@ -198,7 +198,7 @@ class Robot:
 class MultiRobotEnv(gym.Env):
     metadata = {'render.modes': 'rgb_array', 'render_fps': 20}
 
-    def __init__(self, num_robots=3, enable_obstacle_check=True, render_mode=None):
+    def __init__(self, enable_obstacle_check=True, render_mode=None):
         super().__init__()
         self.action_space = spaces.Box(low=np.array([-1, -1]), high=np.array([1, 1]), dtype=np.float32)
         #self.observation_space = spaces.Box()
@@ -206,11 +206,10 @@ class MultiRobotEnv(gym.Env):
         self.config = self._read_yaml_config("hsrg_sim/setup1.yaml")
         global MAP_SIZE # I also don't want to use global everything was setup already
         MAP_SIZE = self.config['general_inputs']['map_size']
-        self.num_robots = self.config['general_inputs']['num_robots'] # Hardcoded now for testing, will be changed later
         self.robots = []
         self.robot_configs = self.config['robots']
+        self.num_robots = len(self.robot_configs)
         self.num_obstacles = self.config['general_inputs']['num_obstacles']
-        self.load_which_robot_configs = self.config['general_inputs']['load_which_robot_configs']
         self.obstacles_size_range = self.config['general_inputs']['obstacles_size_range']
         self.enable_obstacle_check = enable_obstacle_check
         
@@ -239,7 +238,7 @@ class MultiRobotEnv(gym.Env):
             obstacles.append((x, y, size))
         return obstacles
 
-    def _initialize_robots(self, reset_options, rng, robot_configs=None): # Not used at the moment
+    def _initialize_robots(self, reset_options, rng, robot_configs=None):
         """
         Initialize robots with custom configurations
         robot_configs: list of tuples (robot_type, position, goal, battery_limit, comm_range)
@@ -247,111 +246,60 @@ class MultiRobotEnv(gym.Env):
         
         Note that the positions and goals are INT but the intermediate states are FLOAT, this cursed format might be changed in the future
         """
-        self.robot_configs = robot_configs  # Store for reset
-        # Initialize robots with stored configuration
         self.robots = []
         default_battery_limit = 100.0
         default_comm_range = 20.0
-        
-        how_many_tries = 10 # How many more samples should be generated for random position if the initial position collides with obstacles, per robot
-        if self.robot_configs is not None:
-            # Use stored robot configurations
-            for robot_id, config in enumerate(self.robot_configs):
-                config = config.values()
-                print(config)
-                if len(config) == 5:
-                    print(f'Robot {robot_id} using fixed type, position, and goal')
-                    robot_type, pos, goal, battery_limit, comm_range = config
-                # elif len(config) == 4:
-                #     print(f'Robot {robot_id} using fixed type, position, and goal')
-                #     robot_type, pos, goal, battery_limit = config
-                #     comm_range = 20.0
-                elif len(config) == 3:
-                    print(f'Robot {robot_id} using fixed type, position, and goal')
-                    robot_type, pos, goal = config
-                    battery_limit = default_battery_limit
-                    comm_range = default_comm_range
-                elif len(config) == 1:
-                    print(f'Robot {robot_id} using config defined fixed type, random position and goal')
-                    robot_type = config
-                    pos = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32) # Randomly generated position
-                    goal = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32) # Randomly generated goal
-                    battery_limit = default_battery_limit
-                    comm_range = default_comm_range
+
+        for robot_id, config in enumerate(robot_configs):
+            # Extract robot type (required)
+            robot_type = config.get('type')
+            if robot_type not in ['UAV', 'UGV']:
+                raise ValueError(f"Robot {robot_id} has invalid type: {robot_type}")
+
+            # Extract position (random if not provided)
+            if 'initial_position' in config:
+                pos = np.array(config['initial_position'], dtype=np.float32)
+            else:
+                pos = np.array([
+                    rng.randint(0, MAP_SIZE[0]),
+                    rng.randint(0, MAP_SIZE[1])
+                ], dtype=np.float32)
+
+            # Extract goal (random if not provided)
+            if 'goal' in config:
+                goal = np.array(config['goal'], dtype=np.float32)
+            else:
+                goal = np.array([
+                    rng.randint(0, MAP_SIZE[0]),
+                    rng.randint(0, MAP_SIZE[1])
+                ], dtype=np.float32)
+
+            # Extract battery & comm range (default if not provided)
+            battery_limit = config.get('battery_limit', default_battery_limit)
+            comm_range = config.get('communication_range', default_comm_range)
+
+            # Check for obstacle collisions (only for initial position)
+            if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
+                print(f"Warning: Robot {robot_id} initial position collides with obstacles. Retrying...")
+                for _ in range(10):  # Try 10 times to find a valid position
+                    pos = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
+                    if not Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
+                        break
                 else:
-                    raise ValueError("Invalid robot configuration length")
-                if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
-                    print(f"Warning: Robot {robot_id} initial position {pos} collides with obstacles, resetting to random position.")
-                    iter1 = 0
-                    while iter1 < how_many_tries:
-                        pos = np.array([rng.randint(0, MAP_SIZE[0]),
-                                        rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
-                        if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
-                            iter1 += 1
-                        else:
-                            iter1 = 0
-                            break
-                    if iter1 == how_many_tries:
-                        raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
-                # Let's allow the goals to be placed on obstacles. After all, life can't be too easy
-                self.robots.append(Robot(robot_id=robot_id, 
-                                         pos=pos, 
-                                         goal=goal,
-                                         robot_type=robot_type, 
-                                         battery_limit=battery_limit, 
-                                         comm_range=comm_range))
-        else:
-            raise ValueError("No robot configurations provided. Please provide in the setup.yaml file.")
-        # elif (reset_options is not None) and reset_options != {}:
-        #     print('Using hardcoded fixed type, random position and goal for demo')
-        #     for robot_id in range(self.num_robots):
-        #         rand_init_pos = np.array([rng.randint(0, MAP_SIZE[0]), 
-        #                             rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
-        #         rand_goal = np.array([rng.randint(0, MAP_SIZE[0]), 
-        #                             rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
-        #         # Again, let's allow the goals to be placed on obstacles. After all, life can't be too easy
-        #         robot_type = 'UAV' if (robot_id % 3 == 0) else 'UGV'
-                
-        #         if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
-        #             print(f"Warning: Robot {robot_id} initial random position {rand_init_pos} collides with obstacles, resetting to another random position.")
-        #             iter2 = 0
-        #             while iter2 < how_many_tries:
-        #                 rand_init_pos = np.array([rng.randint(0, MAP_SIZE[0]),
-        #                                 rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
-        #                 if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):
-        #                     iter2 += 1
-        #                 else:
-        #                     iter2 = 0
-        #                     break
-        #             if iter2 == how_many_tries:
-        #                 raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
-        #         self.robots.append(Robot(robot_id=robot_id, 
-        #                                  pos=rand_init_pos, 
-        #                                  goal=rand_goal,
-        #                                  robot_type=robot_type, 
-        #                                  battery_limit=default_battery_limit, 
-        #                                  comm_range=default_comm_range))
-        # else:
-        #     print('Using hardcoded type and pos, random goals for demo.')
-        #     init_positions = [(10, 10), (20, 20), (50, 20)]
-        #     rand_goals = []
-        #     for robot_id in range(self.num_robots):
-        #         rand_goals.append(
-        #             np.array([rng.randint(0, MAP_SIZE[0]),
-        #                       rng.randint(0, MAP_SIZE[1])], dtype=np.float32))
-            
-        #     for robot_id in range(self.num_robots):
-        #         robot_type = 'UAV' if robot_id == 2 else 'UGV'
-        #         self.robots.append(Robot(id, 
-        #                                  init_positions[robot_id], 
-        #                                  rand_goals[robot_id], 
-        #                                  robot_type, 
-        #                                  default_battery_limit, 
-        #                                  default_comm_range))
-                
-        # Get initial observations
-        observations = [robot.get_state() for robot in self.robots]
-        return observations
+                    raise ValueError(f"Robot {robot_id} could not find a valid position after 10 tries.")
+
+            # Initialize robot
+            self.robots.append(Robot(
+                robot_id=robot_id,
+                pos=pos,
+                goal=goal,
+                robot_type=robot_type,
+                battery_limit=battery_limit,
+                comm_range=comm_range
+            ))
+
+        # Return observations for all robots
+        return [robot.get_state() for robot in self.robots]
 
     def reset(self, seed=None, options=None):
         """Gym-compliant reset method"""
@@ -522,7 +470,7 @@ class MultiRobotEnv(gym.Env):
 def example_with_video(file_dir):
     """Example using gym-style video recording"""
     # Create environment with human rendering
-    env = MultiRobotEnv(num_robots=6, render_mode='human')
+    env = MultiRobotEnv(render_mode='human')
     
     # Start video recording
     env.start_video_recording(file_dir)
@@ -548,7 +496,7 @@ def example_with_video(file_dir):
 
 def example_with_rgb_arrays():
     """Example collecting RGB arrays (for custom video processing)"""
-    env = MultiRobotEnv(num_robots=6, render_mode='rgb_array')
+    env = MultiRobotEnv(render_mode='rgb_array')
     
     frames = []
     observations, info = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
