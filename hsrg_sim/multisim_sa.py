@@ -204,7 +204,7 @@ class MultiRobotEnv(gym.Env):
         
         self.num_robots = num_robots
         self.robots = []
-        self.num_obstacles = 500
+        self.num_obstacles = 300
         self.obstacles_size_range = (4, 12)
         self.enable_obstacle_check = enable_obstacle_check
         self.robot_configs = None
@@ -278,6 +278,7 @@ class MultiRobotEnv(gym.Env):
                         if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
                             iter1 += 1
                         else:
+                            iter1 = 0
                             break
                     if iter1 == how_many_tries:
                         raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
@@ -296,17 +297,18 @@ class MultiRobotEnv(gym.Env):
                 rand_goal = np.array([rng.randint(0, MAP_SIZE[0]), 
                                     rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
                 # Again, let's allow the goals to be placed on obstacles. After all, life can't be too easy
-                robot_type = 'UAV' if robot_id == 2 else 'UGV'
+                robot_type = 'UAV' if (robot_id % 3 == 0) else 'UGV'
                 
                 if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
                     print(f"Warning: Robot {robot_id} initial random position {rand_init_pos} collides with obstacles, resetting to another random position.")
                     iter2 = 0
                     while iter2 < how_many_tries:
-                        pos = np.array([rng.randint(0, MAP_SIZE[0]),
+                        rand_init_pos = np.array([rng.randint(0, MAP_SIZE[0]),
                                         rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
                         if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):
                             iter2 += 1
                         else:
+                            iter2 = 0
                             break
                     if iter2 == how_many_tries:
                         raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
@@ -507,13 +509,13 @@ class MultiRobotEnv(gym.Env):
 def example_with_video(file_dir):
     """Example using gym-style video recording"""
     # Create environment with human rendering
-    env = MultiRobotEnv(num_robots=3, render_mode='human')
+    env = MultiRobotEnv(num_robots=6, render_mode='human')
     
     # Start video recording
     env.start_video_recording(file_dir)
     
     # Standard gym loop
-    observations, info = env.reset(options={"seed_obstacle": 42, "seed_position": 24})
+    observations, info = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
     
     try:
         for step in range(200):
@@ -533,10 +535,10 @@ def example_with_video(file_dir):
 
 def example_with_rgb_arrays():
     """Example collecting RGB arrays (for custom video processing)"""
-    env = MultiRobotEnv(num_robots=3, render_mode='rgb_array')
+    env = MultiRobotEnv(num_robots=6, render_mode='rgb_array')
     
     frames = []
-    observations, info = env.reset(options={"seed_obstacle": 42, "seed_position": 24})
+    observations, info = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
     
     for step in range(100):
         actions = [np.random.rand(2) * 2 - 1 for _ in range(env.num_robots)]
