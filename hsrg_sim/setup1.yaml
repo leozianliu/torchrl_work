@@ -7,7 +7,7 @@
 # Obstacle parameters
 
 general_inputs:
-  map_size: [300, 500]
+  map_size: [500, 300]
   num_obstacles: 300
   obstacles_size_range: [4, 12] # Range of obstacle sizes
   load_which_robot_configs: 0 # 0 for this yaml, 1 for demo with random pos and goal, 2 for demo with fixed pos and goal

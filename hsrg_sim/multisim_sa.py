@@ -78,10 +78,12 @@ class Robot:
                 return True
         return False
 
-    def take_action(self, action, robots, enable_obstacle_check=True, obstacles=None):
+    def take_action(self, action, robots, enable_obstacle_check=True, obstacles=None, obstacles_size_range=None):
         # Action is a 2D vector representing movement direction
         action = np.clip(action, -1, 1)  # Normalize action to [-1, 1]
         action_scaling = 2.0
+        if action_scaling >= obstacles_size_range[0]:
+            raise ValueError("Action scaling must be smaller than the minimum obstacle size, or it can jump across the obstacles")
         next_pos = self.pos + action * action_scaling # Scale action to reasonable step size
         
         if enable_obstacle_check and self.type == 'UGV':
@@ -344,7 +346,7 @@ class MultiRobotEnv(gym.Env):
             robot.communicate(self.robots)
         
         for robot, action in zip(self.robots, actions):
-            reward = robot.take_action(action, self.robots, self.enable_obstacle_check, self.obstacles)
+            reward = robot.take_action(action, self.robots, self.enable_obstacle_check, self.obstacles, self.obstacles_size_range)
             rewards.append(reward)
             dones.append(robot.reached_goal)
             infos.append({})
@@ -374,7 +376,7 @@ class MultiRobotEnv(gym.Env):
     def _render_human(self):
         """Render for human viewing"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=(10, 10))
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
             plt.ion()
         
         self.ax.clear()
@@ -389,7 +391,7 @@ class MultiRobotEnv(gym.Env):
     def _render_rgb_array(self):
         """Render and return RGB array (for video recording)"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=(10, 10))
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
         
         self.ax.clear()
         self._draw_scene()
@@ -452,7 +454,7 @@ class MultiRobotEnv(gym.Env):
     def start_video_recording(self, filename='simulation.mp4'):
         """Start video recording (gym-style)"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=(10, 10))
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
         
         self.video_writer = FFMpegWriter(fps=20, bitrate=2400)
         self.video_writer.setup(self.fig, filename, dpi=80)
