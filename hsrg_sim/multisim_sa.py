@@ -37,8 +37,8 @@ class Robot:
         local_map = self.get_local_map()
         neighbor_info = self.get_neighbor_info()
         return np.concatenate([
-            self.pos / MAP_SIZE[0],  # Normalized position
-            self.goal / MAP_SIZE[0],  # Normalized goal
+            self.pos / np.asarray(MAP_SIZE),  # Normalized position
+            self.goal / np.asarray(MAP_SIZE),  # Normalized goal
             local_map.flatten(),  # Local map information
             neighbor_info  # Neighbor information
         ])
@@ -59,16 +59,29 @@ class Robot:
         for i, neighbor in enumerate(self.neighbors[:max_neighbors]):
             neighbor_info[i*4:(i+1)*4] = [
                 neighbor.pos[0] / MAP_SIZE[0],
-                neighbor.pos[1] / MAP_SIZE[0],
+                neighbor.pos[1] / MAP_SIZE[1],
                 neighbor.goal[0] / MAP_SIZE[0],
-                neighbor.goal[1] / MAP_SIZE[0]
+                neighbor.goal[1] / MAP_SIZE[1]
             ]
         return neighbor_info
+    
+    def check_obstacle_collision(robot_pos, obstacles, robot_clearance=1.0): # (x, y), list of (x, y, size), square size of bot; for UGV only
+        # Simple collision detection with obstacles
+        x, y = robot_pos
+        for ox, oy, size in obstacles:
+            # Check if robot overlaps with obstacle rectangle
+            if (x - robot_clearance <= ox + size and 
+                x + robot_clearance >= ox and
+                y - robot_clearance <= oy + size and 
+                y + robot_clearance >= oy):
+                return True
+        return False
 
-    def take_action(self, action, enable_obstacle_check=True):
+    def take_action(self, action, robots, enable_obstacle_check=True, obstacles=None):
         # Action is a 2D vector representing movement direction
         action = np.clip(action, -1, 1)  # Normalize action to [-1, 1]
-        next_pos = self.pos + action * 0.5  # Scale action to reasonable step size
+        action_scaling = 2.0
+        next_pos = self.pos + action * action_scaling # Scale action to reasonable step size
         
         if enable_obstacle_check and self.type == 'UGV':
             x, y = int(next_pos[0]), int(next_pos[1])
@@ -83,14 +96,32 @@ class Robot:
         if np.linalg.norm(self.pos - self.goal) < 0.1:
             self.reached_goal = True
             
-        return self.get_reward()
+        return self.get_reward(robots, obstacles)
 
-    def get_reward(self):
+    def get_reward(self, robots, obstacles):
         # Calculate reward based on:
         # 1. Distance to goal
         # 2. Collision with obstacles
         # 3. Goal reached
         # 4. Cooperation with neighbors
+        
+        def interdist_to_reward(bot_interdist): # Input: float
+            # Reward for distance to other robots
+            scaling = 0.01
+            interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
+            return interdist_rew_single
+        
+        def calculate_total_interdist_reward(robots):
+            # Calculate inter-robot distance rewards
+            interdist_reward = 0.0
+            for i in range(len(robots)):
+                for j in range(i + 1, len(robots)):
+                    if robots[i].type == robots[j].type:  # Only consider distance between same type robots
+                        dist = np.linalg.norm(robots[i].pos - robots[j].pos)
+                        interdist_reward += interdist_to_reward(dist) # It's actually a penalty, sign is correct tho
+                    else:
+                        pass
+            return interdist_reward
         
         reward = 0
         
@@ -99,10 +130,14 @@ class Robot:
         reward -= dist_to_goal * 0.1  # Penalize distance to goal
         
         # Collision penalty
-        x, y = int(self.pos[0]), int(self.pos[1])
+        x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
-            if self.known_map[x, y] == 1:
+            if Robot.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0):
                 reward -= 1.0  # Penalty for collision with obstacles
+                
+        # Inter-robot distance penalty
+        interdist_reward = calculate_total_interdist_reward(robots)
+        reward += interdist_reward  # Add inter-robot distance penalty
         
         # Goal reached reward
         if self.reached_goal:
@@ -169,9 +204,8 @@ class MultiRobotEnv(gym.Env):
         
         self.num_robots = num_robots
         self.robots = []
-        self.num_obstacles = 50
-        self.obstacles_size_range = (4, 10)
-        #self.obstacles = self._generate_random_obstacles(num_obstacles=50, min_size=4, max_size=10)
+        self.num_obstacles = 100
+        self.obstacles_size_range = (4, 12)
         self.enable_obstacle_check = enable_obstacle_check
         self.robot_configs = None
         
@@ -199,59 +233,93 @@ class MultiRobotEnv(gym.Env):
     def _initialize_robots(self, reset_options, rng, robot_configs=None): # Not used at the moment
         """
         Initialize robots with custom configurations
-        robot_configs: list of tuples (position, robot_type, goal, battery_limit, comm_range)
-        Example: [((10, 10), 'UAV', (30, 30), 120.0, 25.0), ((20, 20), 'UAV', (40, 40), 90.0, 20.0), ...]
+        robot_configs: list of tuples (robot_type, position, goal, battery_limit, comm_range)
+        Example: [('UAV', (10, 10), (30, 30), 120.0, 25.0), ('UGV', (20, 20), (40, 40), 90.0, 20.0), ...]
+        
+        Note that the positions and goals are INT but the intermediate states are FLOAT, this cursed format might be changed in the future
         """
         self.robot_configs = robot_configs  # Store for reset
         # Initialize robots with stored configuration
         self.robots = []
         default_battery_limit = 100.0
         default_comm_range = 20.0
+        
+        how_many_tries = 10 # How many more samples should be generated for random position if the initial position collides with obstacles, per robot
         if self.robot_configs is not None:
             # Use stored robot configurations
-            for i, config in enumerate(self.robot_configs):
+            for robot_id, config in enumerate(self.robot_configs):
                 if len(config) == 5:
-                    pos, robot_type, goal, battery_limit, comm_range = config
+                    robot_type, pos, goal, battery_limit, comm_range = config
                 elif len(config) == 4:
-                    pos, robot_type, goal, battery_limit = config
+                    robot_type, pos, goal, battery_limit = config
                     comm_range = 20.0
                 elif len(config) == 3:
-                    pos, robot_type, goal = config
+                    robot_type, pos, goal = config
                     battery_limit = default_battery_limit
                     comm_range = default_comm_range
+                elif 
                 else:
                     raise ValueError("Invalid robot configuration length")
-                robot = Robot(i, pos, robot_type, battery_limit, comm_range)
-                robot.goal = np.array(goal, dtype=np.float32)
-                self.robots.append(robot)
+                if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
+                    print(f"Warning: Robot {robot_id} initial position {pos} collides with obstacles, resetting to random position.")
+                    iter1 = 0
+                    while iter1 < how_many_tries:
+                        pos = np.array([rng.randint(0, MAP_SIZE[0]),
+                                        rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
+                        if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
+                            iter1 += 1
+                        else:
+                            break
+                    if iter1 == how_many_tries:
+                        raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
+                # Let's allow the goals to be placed on obstacles. After all, life can't be too easy
+                self.robots.append(Robot(robot_id=robot_id, 
+                                         pos=pos, 
+                                         goal=goal,
+                                         robot_type=robot_type, 
+                                         battery_limit=battery_limit, 
+                                         comm_range=comm_range))
         elif (reset_options is not None) and reset_options != {}:
-            # Use random position and goal
-            for i in range(self.num_robots):
+            print('Using fixed type, random position and goal')
+            for robot_id in range(self.num_robots):
                 rand_init_pos = np.array([rng.randint(0, MAP_SIZE[0]), 
                                     rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
                 rand_goal = np.array([rng.randint(0, MAP_SIZE[0]), 
                                     rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
-                robot_type = 'UAV' if i == 2 else 'UGV'
-                self.robots.append(Robot(robot_id=i, 
+                robot_type = 'UAV' if robot_id == 2 else 'UGV'
+                
+                if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):  # Check if initial position on obstacles
+                    print(f"Warning: Robot {robot_id} initial random position {rand_init_pos} collides with obstacles, resetting to another random position.")
+                    iter2 = 0
+                    while iter2 < how_many_tries:
+                        pos = np.array([rng.randint(0, MAP_SIZE[0]),
+                                        rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
+                        if Robot.check_obstacle_collision(rand_init_pos, self.obstacles, robot_clearance=1.0):
+                            iter2 += 1
+                        else:
+                            break
+                    if iter2 == how_many_tries:
+                        raise ValueError(f"Robot {robot_id} could not find a valid initial position after {how_many_tries} tries.")
+                self.robots.append(Robot(robot_id=robot_id, 
                                          pos=rand_init_pos, 
                                          goal=rand_goal,
                                          robot_type=robot_type, 
                                          battery_limit=default_battery_limit, 
                                          comm_range=default_comm_range))
         else:
-            # Use default pos and random goals
+            print('Using default type, pos, and random goals for demo.')
             init_positions = [(10, 10), (20, 20), (50, 20)]
             rand_goals = []
-            for _ in range(self.num_robots):
+            for robot_id in range(self.num_robots):
                 rand_goals.append(
                     np.array([rng.randint(0, MAP_SIZE[0]),
                               rng.randint(0, MAP_SIZE[1])], dtype=np.float32))
             
-            for i in range(self.num_robots):
-                robot_type = 'UAV' if i == 2 else 'UGV'
-                self.robots.append(Robot(i, 
-                                         init_positions[i], 
-                                         rand_goals[i], 
+            for robot_id in range(self.num_robots):
+                robot_type = 'UAV' if robot_id == 2 else 'UGV'
+                self.robots.append(Robot(id, 
+                                         init_positions[robot_id], 
+                                         rand_goals[robot_id], 
                                          robot_type, 
                                          default_battery_limit, 
                                          default_comm_range))
@@ -303,7 +371,7 @@ class MultiRobotEnv(gym.Env):
             robot.communicate(self.robots)
         
         for robot, action in zip(self.robots, actions):
-            reward = robot.take_action(action, self.enable_obstacle_check)
+            reward = robot.take_action(action, self.robots, self.enable_obstacle_check, self.obstacles)
             rewards.append(reward)
             dones.append(robot.reached_goal)
             infos.append({})
