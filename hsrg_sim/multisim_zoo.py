@@ -10,6 +10,8 @@ from pettingzoo import ParallelEnv
 from pettingzoo.utils import wrappers
 from gymnasium import spaces
 import functools
+from torchrl.envs import PettingZooWrapper
+from torchrl.envs.utils import check_env_specs
 
 #MAP_SIZE = (300, 300)  # Grid size in cells
 
@@ -616,5 +618,10 @@ if __name__ == "__main__":
     print(f"Action spaces: {[env.action_space(agent) for agent in env.possible_agents]}")
     print(f"Observation spaces: {[env.observation_space(agent) for agent in env.possible_agents]}")
     
+    env = PettingZooWrapper(
+        env=env,
+        )
+    
+    check_env_specs(env)
     # Run example
     example_with_video_pz()
