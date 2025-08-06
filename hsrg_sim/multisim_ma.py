@@ -9,6 +9,7 @@ import yaml
 import gymnasium as gym
 from gymnasium import spaces
 from torchrl.envs.utils import check_env_specs
+from torchrl.envs.libs.gym import GymWrapper
 
 #MAP_SIZE = (300, 300)  # Grid size in cells
 
@@ -521,5 +522,6 @@ def example_with_rgb_arrays():
 
 if __name__ == "__main__":
     env = MultiRobotEnv(render_mode='human')
-    check_env_specs
+    env = GymWrapper(env)
+    check_env_specs(env)
     example_with_video('hsrg_sim/gym_style_simulation.mp4')
