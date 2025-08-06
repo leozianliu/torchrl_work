@@ -27,7 +27,7 @@ from torchrl.objectives import ClipPPOLoss, ValueEstimators
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from multisim_zoo import MultiRobotParallelEnv
+from multisim_zoo import MultiRobotParallelEnv, Helper
 
 # Devices
 is_fork = multiprocessing.get_start_method() == "fork"
@@ -38,29 +38,35 @@ device = (
 )
 data_device = torch.device("cpu")  # Use CPU for data collection
 
+config = Helper.read_yaml_config("hsrg_sim/setup1.yaml")
+
 # Sampling
-frames_per_batch = 1_000
-n_iters = 2
+frames_per_batch = config['train_parameters']['frames_per_batch']
+n_iters = config['train_parameters']['n_iters']
 total_frames = frames_per_batch * n_iters
 
 # Training
-num_epochs = 30
-minibatch_size = 400
-lr = 3e-4
+num_epochs = config['train_parameters']['num_epochs']
+minibatch_size = config['train_parameters']['minibatch_size']
+lr = config['train_parameters']['lr']
 max_grad_norm = 1.0
 
 # PPO
-clip_epsilon = 0.2
-gamma = 0.99
-lmbda = 0.9
-entropy_eps = 1e-4
+clip_epsilon = config['train_parameters']['clip_epsilon']
+gamma = config['train_parameters']['clip_epsilon']
+lmbda = config['train_parameters']['lmbda']
+entropy_eps = config['train_parameters']['entropy_eps']
+print(type(entropy_eps))
+print('-------------------------')
 
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
 
-max_steps = 1000
+max_steps = config['train_parameters']['max_steps']
 #num_vec_envs = frames_per_batch // max_steps
 
+# Policy parameter sharing for same type agents
+policy_share_params = config['train_parameters']['policy_share_params']
 # Use MAPPO (centralized critic in each type of agent)
 mappo = True
 
@@ -156,7 +162,7 @@ for group_name in group_map.keys():
                 n_agent_outputs=2 * action_per_agent,  # loc and scale
                 n_agents=n_agents_in_group,
                 centralised=False,
-                share_params=True,  # ✅ All UAVs use SAME parameters
+                share_params=policy_share_params,  # All UAVs use SAME parameters
                 device=device,
                 depth=2,  # Deeper network for UAVs
                 num_cells=256,  # Larger network for UAVs
@@ -173,7 +179,7 @@ for group_name in group_map.keys():
                 n_agent_outputs=2 * action_per_agent,  # loc and scale
                 n_agents=n_agents_in_group,
                 centralised=False,
-                share_params=True,  # ✅ All UGVs use SAME parameters (but different from UAVs)
+                share_params=policy_share_params,  # All UGVs use SAME parameters (but different from UAVs)
                 device=device,
                 depth=2,  # Shallower network for UGVs
                 num_cells=256,  # Smaller network for UGVs
@@ -492,6 +498,7 @@ if __name__ == "__main__":
     env_test = MultiRobotParallelEnv(max_steps=max_steps)
     #group_map_test = create_heterogeneous_group_map(env_test)
     env_test = PettingZooWrapper(env=env_test, group_map=group_map)
+    env_test.reset(options={"seed_obstacle": 42, "seed_position": 100})
     
     # for group_name, agent_list in group_map.items():
     #     print(f"\n{group_name.upper()} group agents: {agent_list}")

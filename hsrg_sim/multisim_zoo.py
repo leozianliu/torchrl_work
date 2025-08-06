@@ -13,17 +13,21 @@ import functools
 
 #MAP_SIZE = (300, 300)  # Grid size in cells
 
+class Helper:
+    def read_yaml_config(config_dir):
+        with open(str(config_dir), 'r') as config_file:
+            return yaml.safe_load(config_file)
+
 class Robot:
-    def __init__(self, robot_id, pos, goal, robot_type, max_neighbors, battery_limit=100.0, comm_range=20.0):
+    def __init__(self, robot_id, pos, goal, robot_type, config, battery_limit, comm_range):
         self.id = robot_id
         self.pos = np.array(pos, dtype=np.float32)
         self.traj = [self.pos.copy()]
         self.type = robot_type
-        self.view_range = 10 if robot_type == 'UGV' else 30
         self.comm_range = comm_range
         self.known_map = np.zeros(MAP_SIZE)
         self.neighbors = []
-        self.max_neighbors = max_neighbors  # Maximum number of neighbors to consider
+        self.max_neighbors = config['general_inputs']['max_neighbors']  # Maximum number of neighbors to consider
         self.messages = []
         self.goal = goal # (x, y) for one robot; multiple instances of Robot will be created in initialize_robots
         self.reached_goal = False
@@ -35,6 +39,11 @@ class Robot:
         # Distributed architecture related attributes
         self.planner = None  # planner instance
         self.meeting_tags = []  # meeting tags
+        # View ranges
+        view_range_ugv = config['general_inputs']['view_range_ugv']
+        view_range_uav = config['general_inputs']['view_range_uav']
+        self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
+
 
     def get_state(self): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
@@ -224,7 +233,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         """
         super().__init__()
         
-        self.config = self._read_yaml_config("hsrg_sim/setup1.yaml")
+        self.config = Helper.read_yaml_config("hsrg_sim/setup1.yaml")
         global MAP_SIZE
         MAP_SIZE = self.config['general_inputs']['map_size']
         
@@ -234,7 +243,6 @@ class MultiRobotParallelEnv(ParallelEnv):
         self.num_obstacles = self.config['general_inputs']['num_obstacles']
         self.obstacles_size_range = self.config['general_inputs']['obstacles_size_range']
         self.enable_obstacle_check = enable_obstacle_check
-        self.max_neighbors = self.config['general_inputs']['max_neighbors']
         
         # PettingZoo required attributes
         self.possible_agents = [f"robot_{i}" for i in range(self.num_robots)]
@@ -270,9 +278,9 @@ class MultiRobotParallelEnv(ParallelEnv):
         """Return action space for a given agent"""
         return self._action_spaces[agent]
     
-    def _read_yaml_config(self, config_dir):
-        with open(str(config_dir), 'r') as config_file:
-            return yaml.safe_load(config_file)
+    # def _read_yaml_config(self, config_dir):
+    #     with open(str(config_dir), 'r') as config_file:
+    #         return yaml.safe_load(config_file)
     
     def _generate_random_obstacles(self, num_obstacles, min_size, max_size, rng):
         obstacles = []
@@ -332,7 +340,7 @@ class MultiRobotParallelEnv(ParallelEnv):
                 pos=pos,
                 goal=goal,
                 robot_type=robot_type,
-                max_neighbors=self.max_neighbors,
+                config=self.config,
                 battery_limit=battery_limit,
                 comm_range=comm_range
             ))
@@ -549,62 +557,27 @@ class MultiRobotParallelEnv(ParallelEnv):
         """Return the maximum number of agents"""
         return len(self.possible_agents)
 
-
-# Wrapper to convert to AEC API if needed
-def env(**kwargs):
-    """Create environment instance"""
-    env = MultiRobotParallelEnv(**kwargs)
-    # Optionally wrap with AEC API converter
-    # env = parallel_to_aec(env)
-    return env
-
-
-# Usage examples
-# def example_parallel_env():
-#     """Example using PettingZoo Parallel API"""
-#     env = MultiRobotParallelEnv(render_mode='human')
-    
-#     observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
-#     print(f"Initial agents: {env.agents}")
-#     print(f"Observation keys: {list(observations.keys())}")
-    
-#     try:
-#         for step in range(200):
-#             # Random actions for all active agents
-#             actions = {agent: np.random.rand(2) * 2 - 1 for agent in env.agents}
-            
-#             observations, rewards, terminations, truncations, infos = env.step(actions)
-            
-#             #print(f"Step {step}: Active agents: {len(env.agents)}, Rewards: {rewards}")
-            
-#             # Check if all agents are done
-#             if not env.agents:
-#                 print("All agents terminated!")
-#                 break
-                
-#     finally:
-#         env.close()
-
-def example_with_video_pz():
-    """Example with video recording using PettingZoo"""
-    env = MultiRobotParallelEnv(render_mode='human')
-    env.start_video_recording('pettingzoo_simulation.mp4')
-    
-    observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
-    
-    try:
-        for step in range(200):
-            actions = {agent: np.random.rand(2) * 2 - 1 for agent in env.agents}
-            observations, rewards, terminations, truncations, infos = env.step(actions)
-            
-            if not env.agents:
-                break
-                
-    finally:
-        env.stop_video_recording()
-        env.close()
-
 if __name__ == "__main__":
+    
+    def example_with_video_pz():
+        """Example with video recording using PettingZoo"""
+        env = MultiRobotParallelEnv(render_mode='human')
+        env.start_video_recording('pettingzoo_simulation.mp4')
+        
+        observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
+        
+        try:
+            for step in range(200):
+                actions = {agent: np.random.rand(2) * 2 - 1 for agent in env.agents}
+                observations, rewards, terminations, truncations, infos = env.step(actions)
+                
+                if not env.agents:
+                    break
+                    
+        finally:
+            env.stop_video_recording()
+            env.close()
+    
     # Test the environment
     env = MultiRobotParallelEnv()
     print(f"Environment created with agents: {env.possible_agents}")
