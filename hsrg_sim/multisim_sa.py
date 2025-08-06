@@ -8,11 +8,12 @@ from matplotlib.animation import FFMpegWriter, PillowWriter, FuncAnimation
 import yaml
 import gymnasium as gym
 from gymnasium import spaces
+from torchrl.envs.utils import check_env_specs
 
 #MAP_SIZE = (300, 300)  # Grid size in cells
 
 class Robot:
-    def __init__(self, robot_id, pos, goal, robot_type='UGV', battery_limit=100.0, comm_range=20.0):
+    def __init__(self, robot_id, pos, goal, robot_type, max_neighbors, battery_limit=100.0, comm_range=20.0):
         self.id = robot_id
         self.pos = np.array(pos, dtype=np.float32)
         self.traj = [self.pos.copy()]
@@ -21,6 +22,7 @@ class Robot:
         self.comm_range = comm_range
         self.known_map = np.zeros(MAP_SIZE)
         self.neighbors = []
+        self.max_neighbors = max_neighbors  # Maximum number of neighbors to consider
         self.messages = []
         self.goal = goal # (x, y) for one robot; multiple instances of Robot will be created in initialize_robots
         self.reached_goal = False
@@ -33,14 +35,14 @@ class Robot:
         self.planner = None  # planner instance
         self.meeting_tags = []  # meeting tags
 
-    def get_state(self):
+    def get_state(self): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
-        local_map = self.get_local_map()
-        neighbor_info = self.get_neighbor_info()
+        #local_map = self.get_local_map()
+        neighbor_info = self.get_neighbor_info(self.max_neighbors)
         return np.concatenate([
             self.pos / np.asarray(MAP_SIZE),  # Normalized position
             self.goal / np.asarray(MAP_SIZE),  # Normalized goal
-            local_map.flatten(),  # Local map information
+            #local_map.flatten(),  # Local map information
             neighbor_info  # Neighbor information
         ])
 
@@ -202,18 +204,20 @@ class MultiRobotEnv(gym.Env):
 
     def __init__(self, enable_obstacle_check=True, render_mode=None):
         super().__init__()
-        self.action_space = spaces.Box(low=np.array([-1, -1]), high=np.array([1, 1]), dtype=np.float32)
-        #self.observation_space = spaces.Box()
-        
+    
         self.config = self._read_yaml_config("hsrg_sim/setup1.yaml")
         global MAP_SIZE # I also don't want to use global everything was setup already
         MAP_SIZE = self.config['general_inputs']['map_size']
         self.robots = []
         self.robot_configs = self.config['robots']
-        self.num_robots = len(self.robot_configs)
+        self.n_agents = len(self.robot_configs)
         self.num_obstacles = self.config['general_inputs']['num_obstacles']
         self.obstacles_size_range = self.config['general_inputs']['obstacles_size_range']
         self.enable_obstacle_check = enable_obstacle_check
+        self.max_neighbors = self.config['general_inputs']['max_neighbors']
+        
+        self.action_space = spaces.Box(low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_agents, 24), dtype=np.float32)
         
         # Gym-standard attributes
         self.render_mode = render_mode  # None, 'human', 'rgb_array'
@@ -234,13 +238,13 @@ class MultiRobotEnv(gym.Env):
     def _generate_random_obstacles(self, num_obstacles, min_size, max_size, rng):
         obstacles = []
         for _ in range(num_obstacles):
-            x = rng.randint(0, MAP_SIZE[0] - max_size)
-            y = rng.randint(0, MAP_SIZE[1] - max_size)
-            size = rng.randint(min_size, max_size + 1)
+            x = rng.integers(0, MAP_SIZE[0] - max_size)
+            y = rng.integers(0, MAP_SIZE[1] - max_size)
+            size = rng.integers(min_size, max_size + 1)
             obstacles.append((x, y, size))
         return obstacles
 
-    def _initialize_robots(self, reset_options, rng, robot_configs=None):
+    def _initialize_robots(self, rng, robot_configs=None):
         """
         Initialize robots with custom configurations
         robot_configs: list of tuples (robot_type, position, goal, battery_limit, comm_range)
@@ -253,7 +257,6 @@ class MultiRobotEnv(gym.Env):
         default_comm_range = 20.0
 
         for robot_id, config in enumerate(robot_configs):
-            # Extract robot type (required)
             robot_type = config.get('type')
             if robot_type not in ['UAV', 'UGV']:
                 raise ValueError(f"Robot {robot_id} has invalid type: {robot_type}")
@@ -263,8 +266,8 @@ class MultiRobotEnv(gym.Env):
                 pos = np.array(config['initial_position'], dtype=np.float32)
             else:
                 pos = np.array([
-                    rng.randint(0, MAP_SIZE[0]),
-                    rng.randint(0, MAP_SIZE[1])
+                    rng.integers(0, MAP_SIZE[0]),
+                    rng.integers(0, MAP_SIZE[1])
                 ], dtype=np.float32)
 
             # Extract goal (random if not provided)
@@ -272,8 +275,8 @@ class MultiRobotEnv(gym.Env):
                 goal = np.array(config['goal'], dtype=np.float32)
             else:
                 goal = np.array([
-                    rng.randint(0, MAP_SIZE[0]),
-                    rng.randint(0, MAP_SIZE[1])
+                    rng.integers(0, MAP_SIZE[0]),
+                    rng.integers(0, MAP_SIZE[1])
                 ], dtype=np.float32)
 
             # Extract battery & comm range (default if not provided)
@@ -284,7 +287,7 @@ class MultiRobotEnv(gym.Env):
             if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
                 print(f"Warning: Robot {robot_id} initial position collides with obstacles. Retrying...")
                 for _ in range(10):  # Try 10 times to find a valid position
-                    pos = np.array([rng.randint(0, MAP_SIZE[0]), rng.randint(0, MAP_SIZE[1])], dtype=np.float32)
+                    pos = np.array([rng.integers(0, MAP_SIZE[0]), rng.integers(0, MAP_SIZE[1])], dtype=np.float32)
                     if not Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
                         break
                 else:
@@ -296,6 +299,7 @@ class MultiRobotEnv(gym.Env):
                 pos=pos,
                 goal=goal,
                 robot_type=robot_type,
+                max_neighbors=self.max_neighbors,
                 battery_limit=battery_limit,
                 comm_range=comm_range
             ))
@@ -304,34 +308,28 @@ class MultiRobotEnv(gym.Env):
         return [robot.get_state() for robot in self.robots]
 
     def reset(self, seed=None, options=None):
-        """Gym-compliant reset method"""
-        if seed is not None:
-            np.random.seed(seed)
+        """Gym-compliant reset method using default_rng for local randomness."""
         if options is None:
             options = {}
-            
-        obs_seed = options.get("seed_obstacle", None)
-        pos_seed = options.get("seed_position", None)
-        if obs_seed is not None:
-            obstacle_rng = np.random.RandomState(obs_seed)
-        else:
-            obstacle_rng = np.random
-        if pos_seed is not None:
-            position_rng = np.random.RandomState(pos_seed) # random goal and position share the same seed
-        else:
-            position_rng = np.random
-        self.obstacles = self._generate_random_obstacles(
-            num_obstacles=self.num_obstacles, 
-            min_size=self.obstacles_size_range[0], 
-            max_size=self.obstacles_size_range[1], 
-            rng=obstacle_rng) # Generate random obstacles with the seed
-        observations = self._initialize_robots(
-            reset_options=options, 
-            rng=position_rng, 
-            robot_configs=self.robot_configs) # Initialize robots with the seed
-        
+
+        main_rng = np.random.default_rng(seed)  # Main RNG seeded from Gym
+
+        obs_seed = options.get("seed_obstacle", None)  # Optional obstacle seed
+        pos_seed = options.get("seed_position", None)  # Optional position seed
+
+        obstacle_rng = np.random.default_rng(obs_seed) if obs_seed is not None else main_rng  # Obstacle RNG
+        position_rng = np.random.default_rng(pos_seed) if pos_seed is not None else main_rng  # Position RNG
+
+        self.obstacles = self._generate_random_obstacles(num_obstacles=self.num_obstacles,
+                                                        min_size=self.obstacles_size_range[0],
+                                                        max_size=self.obstacles_size_range[1],
+                                                        rng=obstacle_rng)  # Generate random obstacles
+        observations = self._initialize_robots(rng=position_rng,
+                                            robot_configs=self.robot_configs)  # Initialize robots
+
         info = {}
-        return observations, info # Gym v0.26+ returns (observation, info)
+        return observations, info  # Gym v0.26+ returns (observation, info)
+
 
     def step(self, actions):
         """Gym-compliant step method"""
@@ -352,6 +350,7 @@ class MultiRobotEnv(gym.Env):
             infos.append({})
             
         observations = [robot.get_state() for robot in self.robots]
+        #print("Observations dim:", np.shape(observations), "Actions dim:", np.shape(actions))
         
         # Render if needed
         if self.render_mode == 'human':
@@ -376,7 +375,7 @@ class MultiRobotEnv(gym.Env):
     def _render_human(self):
         """Render for human viewing"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
             plt.ion()
         
         self.ax.clear()
@@ -391,7 +390,7 @@ class MultiRobotEnv(gym.Env):
     def _render_rgb_array(self):
         """Render and return RGB array (for video recording)"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
         
         self.ax.clear()
         self._draw_scene()
@@ -454,7 +453,7 @@ class MultiRobotEnv(gym.Env):
     def start_video_recording(self, filename='simulation.mp4'):
         """Start video recording (gym-style)"""
         if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/10)
+            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
         
         self.video_writer = FFMpegWriter(fps=20, bitrate=2400)
         self.video_writer.setup(self.fig, filename, dpi=80)
@@ -483,7 +482,7 @@ def example_with_video(file_dir):
     try:
         for step in range(200):
             # Random actions
-            actions = [np.random.rand(2) * 2 - 1 for _ in range(env.num_robots)]
+            actions = [np.random.rand(2) * 2 - 1 for _ in range(env.n_agents)]
             
             # Gym-style step
             observations, rewards, terminated, truncated, infos = env.step(actions)
@@ -504,7 +503,7 @@ def example_with_rgb_arrays():
     observations, info = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
     
     for step in range(100):
-        actions = [np.random.rand(2) * 2 - 1 for _ in range(env.num_robots)]
+        actions = [np.random.rand(2) * 2 - 1 for _ in range(env.n_agents)]
         observations, rewards, terminated, truncated, infos = env.step(actions)
         
         # Get RGB frame
@@ -521,4 +520,6 @@ def example_with_rgb_arrays():
     return frames
 
 if __name__ == "__main__":
+    env = MultiRobotEnv(render_mode='human')
+    check_env_specs
     example_with_video('hsrg_sim/gym_style_simulation.mp4')
