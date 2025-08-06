@@ -22,9 +22,9 @@ train_parameters:
 
 general_inputs:
   map_size: [500, 300]
-  num_obstacles: 100
-  obstacles_size_range: [4, 12] # Range of obstacle sizes
-  max_neighbors: 5 # Maximum number of neighbors each robot could observe
+  num_obstacles: 200
+  obstacles_size_range: [3, 10] # Range of obstacle sizes
+  max_neighbors: 0 # Maximum number of neighbors each robot could observe
   view_range_ugv: 5
   view_range_uav: 30
 

@@ -44,27 +44,53 @@ class Robot:
         view_range_uav = config['general_inputs']['view_range_uav']
         self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
 
-
-    def get_state(self): # NOTE: local_map is obsolete and irrelevant to RL agents
+    def get_state(self, obstacles): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
         #local_map = self.get_local_map()
         neighbor_info = self.get_neighbor_info(self.max_neighbors)
         return np.concatenate([
             self.pos / np.asarray(MAP_SIZE),  # Normalized position
             self.goal / np.asarray(MAP_SIZE),  # Normalized goal
-            #local_map.flatten(),  # Local map information
+            self.raycast_distances(obstacles, self.pos, self.view_range) / self.view_range,  # Local map information
             neighbor_info  # Neighbor information
         ])
 
-    def get_local_map(self, size=10):
-        # Get local map around robot
-        x, y = int(self.pos[0]), int(self.pos[1])
-        local_map = np.zeros((size*2+1, size*2+1))
-        for i in range(-size, size+1):
-            for j in range(-size, size+1):
-                if 0 <= x+i < MAP_SIZE[0] and 0 <= y+j < MAP_SIZE[1]:
-                    local_map[i+size, j+size] = self.known_map[x+i, y+j]
-        return local_map
+    # def get_local_map(self, size=10):
+    #     # Get local map around robot
+    #     x, y = int(self.pos[0]), int(self.pos[1])
+    #     local_map = np.zeros((size*2+1, size*2+1))
+    #     for i in range(-size, size+1):
+    #         for j in range(-size, size+1):
+    #             if 0 <= x+i < MAP_SIZE[0] and 0 <= y+j < MAP_SIZE[1]:
+    #                 local_map[i+size, j+size] = self.known_map[x+i, y+j]
+    #     return local_map
+    
+    def raycast_distances(self, obstacles, agent_pos, max_range, angle_step=20):
+        """Cast rays from agent and return distances to nearest obstacles."""
+        angles = np.arange(0, 360, angle_step)
+        distances = []
+        agent_row, agent_col = agent_pos
+        obstacle_matrix = np.zeros(MAP_SIZE, dtype=int)
+        for x, y, size in obstacles:
+            obstacle_matrix[y:y+size, x:x+size] = 1
+        rows, cols = obstacle_matrix.shape
+        
+        for angle in angles:
+            rad = np.radians(angle)
+            dx, dy = np.cos(rad), np.sin(rad)
+            x, y, dist = agent_col, agent_row, 0.0
+            
+            while dist < max_range:
+                x += dx * 0.5
+                y += dy * 0.5
+                dist += 0.5
+                
+                row, col = int(round(y)), int(round(x))
+                if row < 0 or row >= rows or col < 0 or col >= cols or obstacle_matrix[row, col]:
+                    break
+            
+            distances.append(min(dist, max_range))
+        return np.array(distances)
 
     def get_neighbor_info(self, max_neighbors=5):
         # Get information about neighbors (position and goal)
@@ -247,11 +273,12 @@ class MultiRobotParallelEnv(ParallelEnv):
         # PettingZoo required attributes
         self.possible_agents = [f"robot_{i}" for i in range(self.num_robots)]
         self.agents = self.possible_agents[:]
+        max_neighbors = self.config['general_inputs']['max_neighbors']
         
         # Action and observation spaces for each agent
         self._action_spaces = {agent: spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32) 
                               for agent in self.possible_agents}
-        self._observation_spaces = {agent: spaces.Box(low=0, high=1, shape=(24,), dtype=np.float32) 
+        self._observation_spaces = {agent: spaces.Box(low=0, high=1, shape=(4+4*max_neighbors+18,), dtype=np.float32) 
                                    for agent in self.possible_agents}
         
         # Rendering
@@ -383,7 +410,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         infos = {}
         
         for i, agent in enumerate(self.agents):
-            observations[agent] = self.robots[i].get_state()
+            observations[agent] = self.robots[i].get_state(self.obstacles)
             infos[agent] = {}
             
         return observations, infos
@@ -439,7 +466,7 @@ class MultiRobotParallelEnv(ParallelEnv):
                 )
                 
                 # Get new observation
-                observations[agent] = robot.get_state()
+                observations[agent] = robot.get_state(self.obstacles)
                 rewards[agent] = reward
                 terminations[agent] = robot.reached_goal
                 truncations[agent] = False  # Can add truncation logic here
