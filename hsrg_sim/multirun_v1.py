@@ -40,7 +40,7 @@ data_device = torch.device("cpu")  # Use CPU for data collection
 
 # Sampling
 frames_per_batch = 1_000
-n_iters = 5
+n_iters = 2
 total_frames = frames_per_batch * n_iters
 
 # Training
@@ -64,6 +64,7 @@ max_steps = 1000
 # Use MAPPO (centralized critic in each type of agent)
 mappo = True
 
+reset_options = {"seed_obstacle": 420, "seed_position": 240}
 
 # ==============================================================================
 # HETEROGENEOUS AGENT SETUP
@@ -290,7 +291,7 @@ combined_policy = HeterogeneousPolicy(policies)
 combined_critic = HeterogeneousCritic(critics)
 
 # print("\nTesting heterogeneous networks:")
-reset_data = env.reset().to(device)
+reset_data = env.reset(options=reset_options).to(device)
 # print("Reset data keys:", reset_data.keys(True))
 
 policy_output = combined_policy(reset_data)
@@ -488,17 +489,18 @@ if __name__ == "__main__":
     
     # Demonstrate parameter sharing
     print("\n4. PARAMETER SHARING VERIFICATION:")
-    env_test = MultiRobotParallelEnv()
-    group_map_test = create_heterogeneous_group_map(env_test)
+    env_test = MultiRobotParallelEnv(max_steps=max_steps)
+    #group_map_test = create_heterogeneous_group_map(env_test)
+    env_test = PettingZooWrapper(env=env_test, group_map=group_map)
     
-    for group_name, agent_list in group_map_test.items():
-        print(f"\n{group_name.upper()} group agents: {agent_list}")
-        if len(agent_list) > 1:
-            print(f"  All {len(agent_list)} {group_name} agents use the SAME {sum(p.numel() for p in policies[group_name].parameters()):,} policy parameters")
-            print(f"  All {len(agent_list)} {group_name} agents use the SAME {sum(p.numel() for p in critics[group_name].parameters()):,} critic parameters")
-        else:
-            print(f"  Single {group_name} agent uses {sum(p.numel() for p in policies[group_name].parameters()):,} policy parameters")
-            print(f"  Single {group_name} agent uses {sum(p.numel() for p in critics[group_name].parameters()):,} critic parameters")
+    # for group_name, agent_list in group_map.items():
+    #     print(f"\n{group_name.upper()} group agents: {agent_list}")
+    #     if len(agent_list) > 1:
+    #         print(f"  All {len(agent_list)} {group_name} agents use the SAME {sum(p.numel() for p in policies[group_name].parameters()):,} policy parameters")
+    #         print(f"  All {len(agent_list)} {group_name} agents use the SAME {sum(p.numel() for p in critics[group_name].parameters()):,} critic parameters")
+    #     else:
+    #         print(f"  Single {group_name} agent uses {sum(p.numel() for p in policies[group_name].parameters()):,} policy parameters")
+    #         print(f"  Single {group_name} agent uses {sum(p.numel() for p in critics[group_name].parameters()):,} critic parameters")
     
     # Plot results
     plt.figure(figsize=(10, 6))
@@ -511,23 +513,19 @@ if __name__ == "__main__":
     
     # Render final policy
     def render_callback(env, *_):
-        frames.append(env.render(render_mode='rgb_array'))
+        frames.append(env.render(render_mode='human'))
     
+    env_test.start_video_recording('hsrg_sim/marl_simulation.mp4')
     frames = []
     print("\n5. Rendering final policy...")
     with torch.no_grad():
-        env.rollout(
-            max_steps=max_steps,
+        env_test.rollout(
+            max_steps=100,
             policy=combined_policy,
             callback=render_callback,
             auto_cast_to_device=True,
             break_when_any_done=False,
         )
+    env_test.stop_video_recording()
+    env_test.close()
     
-    # Save video
-    try:
-        import imageio
-        imageio.mimsave('hsrg_sim/heterogeneous_rollout.mp4', frames, fps=30, macro_block_size=1)
-        print("Video saved as 'heterogeneous_rollout.mp4'")
-    except ImportError:
-        print("Install imageio to save video: pip install imageio[ffmpeg]")

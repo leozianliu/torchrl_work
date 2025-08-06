@@ -90,11 +90,14 @@ class Robot:
             raise ValueError("Action scaling must be smaller than the minimum obstacle size, or it can jump across the obstacles")
         next_pos = self.pos + action * action_scaling # Scale action to reasonable step size
         
+        x, y = int(next_pos[0]), int(next_pos[1])
         if enable_obstacle_check and self.type == 'UGV':
-            x, y = int(next_pos[0]), int(next_pos[1])
-            if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1] and self.known_map[x, y] != 1:
+            if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1] and not self.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0):
                 self.pos = next_pos
-        else:  # UAV ignores obstacles or obstacle check is disabled
+        elif enable_obstacle_check and self.type == 'UAV': # Drones can fly over obstacles but not out of map
+            if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
+                self.pos = next_pos
+        else:
             self.pos = next_pos
             
         self.traj.append(self.pos.copy())
@@ -315,7 +318,7 @@ class MultiRobotParallelEnv(ParallelEnv):
 
             # Check for obstacle collisions (only for initial position)
             if Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
-                print(f"Warning: Robot {robot_id} initial position collides with obstacles. Retrying...")
+                #print(f"Warning: Robot {robot_id} initial position collides with obstacles. Retrying...")
                 for _ in range(10):  # Try 10 times to find a valid position
                     pos = np.array([rng.integers(0, MAP_SIZE[0]), rng.integers(0, MAP_SIZE[1])], dtype=np.float32)
                     if not Robot.check_obstacle_collision(pos, self.obstacles, robot_clearance=1.0):
@@ -475,17 +478,7 @@ class MultiRobotParallelEnv(ParallelEnv):
 
     def _render_rgb_array(self):
         """Render and return RGB array"""
-        if not hasattr(self, 'fig'):
-            self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
-        
-        self.ax.clear()
-        self._draw_scene()
-        self.fig.canvas.draw()
-        
-        # Convert to RGB array
-        buf = np.frombuffer(self.fig.canvas.tostring_argb(), dtype=np.uint8)
-        buf = buf.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-        return buf
+        raise NotImplementedError("RGB array rendering is not implemented yet. Use human which could be also saved.")
 
     def _draw_scene(self):
         """Draw the simulation scene"""
@@ -536,12 +529,12 @@ class MultiRobotParallelEnv(ParallelEnv):
             self.video_writer.finish()
 
     # Video recording methods
-    def start_video_recording(self, filename='simulation.mp4'):
+    def start_video_recording(self, filename='simulation.mp4', fps=20, bitrate=2400):
         """Start video recording"""
         if not hasattr(self, 'fig'):
             self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
         
-        self.video_writer = FFMpegWriter(fps=20, bitrate=2400)
+        self.video_writer = FFMpegWriter(fps=fps, bitrate=bitrate)
         self.video_writer.setup(self.fig, filename, dpi=80)
 
     def stop_video_recording(self):
@@ -567,30 +560,30 @@ def env(**kwargs):
 
 
 # Usage examples
-def example_parallel_env():
-    """Example using PettingZoo Parallel API"""
-    env = MultiRobotParallelEnv(render_mode='human')
+# def example_parallel_env():
+#     """Example using PettingZoo Parallel API"""
+#     env = MultiRobotParallelEnv(render_mode='human')
     
-    observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
-    print(f"Initial agents: {env.agents}")
-    print(f"Observation keys: {list(observations.keys())}")
+#     observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
+#     print(f"Initial agents: {env.agents}")
+#     print(f"Observation keys: {list(observations.keys())}")
     
-    try:
-        for step in range(200):
-            # Random actions for all active agents
-            actions = {agent: np.random.rand(2) * 2 - 1 for agent in env.agents}
+#     try:
+#         for step in range(200):
+#             # Random actions for all active agents
+#             actions = {agent: np.random.rand(2) * 2 - 1 for agent in env.agents}
             
-            observations, rewards, terminations, truncations, infos = env.step(actions)
+#             observations, rewards, terminations, truncations, infos = env.step(actions)
             
-            print(f"Step {step}: Active agents: {len(env.agents)}, Rewards: {rewards}")
+#             #print(f"Step {step}: Active agents: {len(env.agents)}, Rewards: {rewards}")
             
-            # Check if all agents are done
-            if not env.agents:
-                print("All agents terminated!")
-                break
+#             # Check if all agents are done
+#             if not env.agents:
+#                 print("All agents terminated!")
+#                 break
                 
-    finally:
-        env.close()
+#     finally:
+#         env.close()
 
 def example_with_video_pz():
     """Example with video recording using PettingZoo"""
@@ -633,4 +626,4 @@ if __name__ == "__main__":
     print(tensordict)
     
     # Run example
-    # example_parallel_env()
+    example_with_video_pz()
