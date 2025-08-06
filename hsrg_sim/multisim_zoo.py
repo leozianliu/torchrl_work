@@ -7,11 +7,9 @@ import matplotlib.patches as patches
 from matplotlib.animation import FFMpegWriter, PillowWriter, FuncAnimation
 import yaml
 from pettingzoo import ParallelEnv
-from pettingzoo.utils import wrappers
+from pettingzoo.utils import parallel_to_aec, wrappers
 from gymnasium import spaces
 import functools
-from torchrl.envs import PettingZooWrapper
-from torchrl.envs.utils import check_env_specs
 
 #MAP_SIZE = (300, 300)  # Grid size in cells
 
@@ -116,7 +114,7 @@ class Robot:
         
         def interdist_to_reward(bot_interdist): # Input: float
             # Reward for distance to other robots
-            scaling = 0.01
+            scaling = 0.001
             interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
             return interdist_rew_single
         
@@ -213,7 +211,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         "render_fps": 20,
     }
 
-    def __init__(self, enable_obstacle_check=True, render_mode=None):
+    def __init__(self, max_steps=1000, enable_obstacle_check=True, render_mode=None):
         """
         Initialize the parallel multi-robot environment
         
@@ -257,7 +255,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         # Environment state
         self.obstacles = []
         self._step_count = 0
-        self._max_steps = 1000
+        self.max_steps = max_steps
         
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -441,23 +439,23 @@ class MultiRobotParallelEnv(ParallelEnv):
         
         # Check for truncation (max steps)
         self._step_count += 1
-        if self._step_count >= self._max_steps:
+        if self._step_count >= self.max_steps:
             truncations = {agent: True for agent in self.possible_agents}
         
         # Render if needed
         if self.render_mode == 'human':
-            self.render()
+            self.render(self.render_mode)
             
         return observations, rewards, terminations, truncations, infos
 
-    def render(self):
+    def render(self, render_mode=None):
         """Render the environment"""
-        if self.render_mode is None:
+        if render_mode is None:
             return
         
-        if self.render_mode == 'human':
+        if render_mode == 'human':
             return self._render_human()
-        elif self.render_mode == 'rgb_array':
+        elif render_mode == 'rgb_array':
             return self._render_rgb_array()
 
     def _render_human(self):
@@ -485,7 +483,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         self.fig.canvas.draw()
         
         # Convert to RGB array
-        buf = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8)
+        buf = np.frombuffer(self.fig.canvas.tostring_argb(), dtype=np.uint8)
         buf = buf.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
         return buf
 
@@ -563,6 +561,8 @@ class MultiRobotParallelEnv(ParallelEnv):
 def env(**kwargs):
     """Create environment instance"""
     env = MultiRobotParallelEnv(**kwargs)
+    # Optionally wrap with AEC API converter
+    # env = parallel_to_aec(env)
     return env
 
 
@@ -582,7 +582,7 @@ def example_parallel_env():
             
             observations, rewards, terminations, truncations, infos = env.step(actions)
             
-            #print(f"Step {step}: Active agents: {len(env.agents)}, Rewards: {rewards}")
+            print(f"Step {step}: Active agents: {len(env.agents)}, Rewards: {rewards}")
             
             # Check if all agents are done
             if not env.agents:
@@ -595,7 +595,7 @@ def example_parallel_env():
 def example_with_video_pz():
     """Example with video recording using PettingZoo"""
     env = MultiRobotParallelEnv(render_mode='human')
-    env.start_video_recording('hsrg_sim/pettingzoo_simulation.mp4')
+    env.start_video_recording('pettingzoo_simulation.mp4')
     
     observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
     
@@ -618,10 +618,19 @@ if __name__ == "__main__":
     print(f"Action spaces: {[env.action_space(agent) for agent in env.possible_agents]}")
     print(f"Observation spaces: {[env.observation_space(agent) for agent in env.possible_agents]}")
     
-    env = PettingZooWrapper(
-        env=env,
-        )
+    # Example with TorchRL wrapper
+    from torchrl.envs.libs.pettingzoo import PettingZooWrapper
     
-    check_env_specs(env)
+    # Solution 1: Use custom group_map to put all agents under "agents" key
+    group_map = {"agents": [f"robot_{i}" for i in range(len(env.possible_agents))]}
+    wrapped_env = PettingZooWrapper(env=env, group_map=group_map)
+    print("Wrapped environment spec:")
+    print(wrapped_env.specs)
+    
+    # Test reset
+    tensordict = wrapped_env.reset()
+    print("Reset TensorDict structure:")
+    print(tensordict)
+    
     # Run example
-    example_with_video_pz()
+    # example_parallel_env()
