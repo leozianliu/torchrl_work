@@ -21,7 +21,7 @@ class Helper:
 class Robot:
     def __init__(self, robot_id, pos, goal, robot_type, config, battery_limit, comm_range):
         self.id = robot_id
-        self.pos = np.array(pos, dtype=np.float32)
+        self.pos = np.array(pos, dtype=np.float32) # (x, y)
         self.traj = [self.pos.copy()]
         self.type = robot_type
         self.comm_range = comm_range
@@ -65,7 +65,7 @@ class Robot:
     #                 local_map[i+size, j+size] = self.known_map[x+i, y+j]
     #     return local_map
     
-    def raycast_distances(self, obstacles, agent_pos, max_range, angle_step=20):
+    def raycast_distances(self, obstacles, agent_pos, max_range, angle_step=20, ray_step=0.5):
         """Cast rays from agent and return distances to nearest obstacles."""
         angles = np.arange(0, 360, angle_step)
         distances = []
@@ -81,11 +81,11 @@ class Robot:
             x, y, dist = agent_col, agent_row, 0.0
             
             while dist < max_range:
-                x += dx * 0.5
-                y += dy * 0.5
-                dist += 0.5
+                x += dx * ray_step
+                y += dy * ray_step
+                dist += ray_step
                 
-                row, col = int(round(y)), int(round(x))
+                row, col = int(y), int(x) # floor the numbers to fall in [xy, xy+size)
                 if row < 0 or row >= rows or col < 0 or col >= cols or obstacle_matrix[row, col]:
                     break
             

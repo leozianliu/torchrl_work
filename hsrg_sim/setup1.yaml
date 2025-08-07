@@ -31,8 +31,8 @@ general_inputs:
 robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
   - #id: 0
     type: 'UAV'
-    initial_position: [10, 10]
-    goal: [90, 90]
+    initial_position: [10, 10] # (x, y)
+    goal: [90, 90] # (x, y)
     battery_limit: 100.0
     communication_range: 20.0
   - #id: 1
