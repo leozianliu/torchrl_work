@@ -45,14 +45,14 @@ class Robot:
         self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
         self.obstacle_matrix = None
 
-    def get_state(self, obstacles): # NOTE: local_map is obsolete and irrelevant to RL agents
+    def get_state(self, obstacles, robots): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
         #local_map = self.get_local_map()
         neighbor_info = self.get_neighbor_info(self.max_neighbors)
         return np.concatenate([
             self.pos / np.asarray(MAP_SIZE),  # Normalized position
             self.goal / np.asarray(MAP_SIZE),  # Normalized goal
-            self.raycast_distances(obstacles, self.pos, self.view_range) / self.view_range,  # Local map information
+            self.raycast_distances(obstacles, self.pos, robots, self.view_range) / self.view_range,  # Local map information
             neighbor_info  # Neighbor information
         ])
 
@@ -66,19 +66,26 @@ class Robot:
     #                 local_map[i+size, j+size] = self.known_map[x+i, y+j]
     #     return local_map
     
-    def raycast_distances(self, obstacles, agent_pos, max_range, angle_step=20, ray_step=0.5):
-        """Cast rays from agent and return distances to nearest obstacles."""
+    def raycast_distances(self, obstacles, agent_pos, robots, max_range, angle_step=20, ray_step=0.5):
+        """Cast rays from agent and return distances to nearest obstacles and robots."""
         angles = np.arange(0, 360, angle_step)
         distances = []
         agent_x, agent_y = agent_pos
         
-        self.obstacle_matrix = np.zeros(MAP_SIZE, dtype=int)
+        self.obstacle_matrix = np.zeros((MAP_SIZE[0]+1, MAP_SIZE[1]+1), dtype=int) # reset to 0
         for x, y, size in obstacles:
             x_start = max(0, x)
             y_start = max(0, y)
             x_end = min(MAP_SIZE[0], x + size)
             y_end = min(MAP_SIZE[1], y + size)
-            self.obstacle_matrix[x_start:x_end, y_start:y_end] = 1 # raange inclusive: [xy, xy+size-1]
+            self.obstacle_matrix[x_start:x_end, y_start:y_end] = 1 # range inclusive: [xy, xy+size-1]
+            
+        for robot in robots:
+            if self.type == robot.type and robot.id != self.id:  # Only consider same type robots
+                x, y = round(robot.pos[0]), round(robot.pos[1]) # round to nearest cell
+                x = max(0, min(MAP_SIZE[0], x))  # Ensure within bounds
+                y = max(0, min(MAP_SIZE[1], y))
+                self.obstacle_matrix[x, y] = 1
         
         for angle in angles:
             rad = np.radians(angle)
@@ -160,8 +167,11 @@ class Robot:
         
         def interdist_to_reward(bot_interdist): # Input: float
             # Reward for distance to other robots
-            scaling = 0.001
-            interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
+            scaling = 0.334
+            bot_interdict = np.clip(bot_interdist, 0, min(MAP_SIZE))
+            interdist_rew_single = scaling * bot_interdict - 1 # -1 rew when robots collide, >=3 distance no penalty no reward
+            interdist_rew_single = min(0, interdist_rew_single)
+            # interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
             return interdist_rew_single
         
         def calculate_total_interdist_reward(robots):
@@ -418,7 +428,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         infos = {}
         
         for i, agent in enumerate(self.agents):
-            observations[agent] = self.robots[i].get_state(self.obstacles)
+            observations[agent] = self.robots[i].get_state(self.obstacles, self.robots)
             infos[agent] = {}
             
         return observations, infos
@@ -474,7 +484,7 @@ class MultiRobotParallelEnv(ParallelEnv):
                 )
                 
                 # Get new observation
-                observations[agent] = robot.get_state(self.obstacles)
+                observations[agent] = robot.get_state(self.obstacles, self.robots)
                 rewards[agent] = reward
                 terminations[agent] = robot.reached_goal
                 truncations[agent] = False  # Can add truncation logic here
@@ -574,7 +584,7 @@ class MultiRobotParallelEnv(ParallelEnv):
             self.ax.plot(robot.goal[0], robot.goal[1], 'kx')
             
             # Draw lidar rays
-            ray_distances = robot.raycast_distances(self.obstacles, robot.pos, robot.view_range)
+            ray_distances = robot.raycast_distances(self.obstacles, robot.pos, self.robots, robot.view_range)
             self.add_raycast_to_fig(self.ax, robot.pos, ray_distances)
 
     def close(self):

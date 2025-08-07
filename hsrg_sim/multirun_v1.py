@@ -53,7 +53,7 @@ max_grad_norm = 1.0
 
 # PPO
 clip_epsilon = config['train_parameters']['clip_epsilon']
-gamma = config['train_parameters']['clip_epsilon']
+gamma = config['train_parameters']['gamma']
 lmbda = config['train_parameters']['lmbda']
 entropy_eps = config['train_parameters']['entropy_eps']
 print(type(entropy_eps))

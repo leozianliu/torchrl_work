@@ -51,3 +51,5 @@ robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
     type: 'UGV'
   - #id: 5
     type: 'UAV'
+  - #id: 6
+    type: 'UAV'
