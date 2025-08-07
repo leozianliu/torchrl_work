@@ -2,14 +2,14 @@
 
 train_parameters:
   frames_per_batch: 2000
-  n_iters: 1
+  n_iters: 3
   #total_frames = frames_per_batch * n_iters
 
   # Training
   num_epochs: 30
   minibatch_size: 400
   lr: !!float 3e-4
-  max_steps: 2000
+  max_steps: 1000
 
   # Structure
   policy_share_params: True
