@@ -43,6 +43,7 @@ class Robot:
         view_range_ugv = config['general_inputs']['view_range_ugv']
         view_range_uav = config['general_inputs']['view_range_uav']
         self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
+        self.obstacle_matrix = None
 
     def get_state(self, obstacles): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
@@ -69,24 +70,31 @@ class Robot:
         """Cast rays from agent and return distances to nearest obstacles."""
         angles = np.arange(0, 360, angle_step)
         distances = []
-        agent_row, agent_col = agent_pos
-        obstacle_matrix = np.zeros(MAP_SIZE, dtype=int)
+        agent_x, agent_y = agent_pos
+        
+        self.obstacle_matrix = np.zeros(MAP_SIZE, dtype=int)
         for x, y, size in obstacles:
-            obstacle_matrix[y:y+size, x:x+size] = 1
-        rows, cols = obstacle_matrix.shape
+            x_start = max(0, x)
+            y_start = max(0, y)
+            x_end = min(MAP_SIZE[0], x + size)
+            y_end = min(MAP_SIZE[1], y + size)
+            self.obstacle_matrix[x_start:x_end, y_start:y_end] = 1 # raange inclusive: [xy, xy+size-1]
         
         for angle in angles:
             rad = np.radians(angle)
             dx, dy = np.cos(rad), np.sin(rad)
-            x, y, dist = agent_col, agent_row, 0.0
+            x, y, dist = agent_x, agent_y, 0.0
             
             while dist < max_range:
                 x += dx * ray_step
                 y += dy * ray_step
                 dist += ray_step
                 
-                row, col = int(y), int(x) # floor the numbers to fall in [xy, xy+size)
-                if row < 0 or row >= rows or col < 0 or col >= cols or obstacle_matrix[row, col]:
+                # Check bounds and obstacles
+                xi, yi = int(x), int(y) # floor the inputs [xy, xy+size) to [xy, xy+size-1]
+                if (xi < 0 or xi >= MAP_SIZE[0] or 
+                    yi < 0 or yi >= MAP_SIZE[1] or 
+                    self.obstacle_matrix[xi, yi]):
                     break
             
             distances.append(min(dist, max_range))
@@ -515,6 +523,15 @@ class MultiRobotParallelEnv(ParallelEnv):
         """Render and return RGB array"""
         raise NotImplementedError("RGB array rendering is not implemented yet. Use human which could be also saved.")
 
+    def add_raycast_to_fig(self, ax, robot_pos, raycast_distances, angle_step=20):
+        """Plot raycast lines on an existing axis."""
+        angles_deg = np.arange(0, 360, angle_step)
+        angles_rad = np.radians(angles_deg)
+        for dist, angle in zip(raycast_distances, angles_rad):
+            x_end = robot_pos[0] + dist * np.cos(angle)
+            y_end = robot_pos[1] + dist * np.sin(angle)
+            ax.plot([robot_pos[0], x_end], [robot_pos[1], y_end], 'r--', linewidth=0.8, alpha=0.6)
+
     def _draw_scene(self):
         """Draw the simulation scene"""
         self.ax.set_xlim(0, MAP_SIZE[0])
@@ -555,6 +572,10 @@ class MultiRobotParallelEnv(ParallelEnv):
             self.ax.add_patch(patches.Circle(robot.pos, robot.view_range, fill=False, linestyle='--', alpha=0.3))
             self.ax.add_patch(patches.Circle(robot.pos, robot.comm_range, fill=False, linestyle=':', color='green', alpha=0.2))
             self.ax.plot(robot.goal[0], robot.goal[1], 'kx')
+            
+            # Draw lidar rays
+            ray_distances = robot.raycast_distances(self.obstacles, robot.pos, robot.view_range)
+            self.add_raycast_to_fig(self.ax, robot.pos, ray_distances)
 
     def close(self):
         """Close the environment"""
