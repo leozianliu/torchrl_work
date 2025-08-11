@@ -31,7 +31,7 @@ from tqdm import tqdm
 # Devices
 is_fork = multiprocessing.get_start_method() == "fork"
 device = (
-    torch.device(0)
+    torch.device(2)
     if torch.cuda.is_available() and not is_fork
     else torch.device("cpu")
 )
@@ -187,6 +187,8 @@ pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
 
 episode_reward_mean_list = []
 for tensordict_data in collector:
+    print(tensordict_data)
+    print('--------------------')
     tensordict_data.set(
         ("next", "agents", "done"),
         tensordict_data.get(("next", "done"))

@@ -195,7 +195,7 @@ class Robot:
         # Collision penalty
         x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
-            if Robot.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0):
+            if Robot.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
                 reward -= 1.0  # Penalty for collision with obstacles
                 
         # Inter-robot distance penalty
@@ -267,7 +267,7 @@ class MultiRobotParallelEnv(ParallelEnv):
         "render_fps": 20,
     }
 
-    def __init__(self, max_steps=1000, enable_obstacle_check=True, render_mode=None):
+    def __init__(self, seed=None, options=None, max_steps=1000, enable_obstacle_check=True, render_mode=None):
         """
         Initialize the parallel multi-robot environment
         
@@ -312,6 +312,18 @@ class MultiRobotParallelEnv(ParallelEnv):
         self.obstacles = []
         self._step_count = 0
         self.max_steps = max_steps
+        
+        # Random seeds
+        self.seed = seed
+        if seed is None:
+            raise ValueError("Env seed must be provided for reproducibility.")
+        #self.options = options # options={"seed_obstacle": xx, "seed_position": xx}
+        obs_seed = seed + 1
+        pos_seed = seed + 2
+        self.main_rng = np.random.default_rng(self.seed)
+        self.obstacle_rng = np.random.default_rng(obs_seed)
+        self.position_rng = np.random.default_rng(pos_seed)
+        
         
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -390,7 +402,7 @@ class MultiRobotParallelEnv(ParallelEnv):
                 comm_range=comm_range
             ))
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None): # Just fillers
         """
         Reset the environment (PettingZoo Parallel API)
         
@@ -398,26 +410,16 @@ class MultiRobotParallelEnv(ParallelEnv):
             observations (dict): Dictionary mapping agent names to observations
             infos (dict): Dictionary mapping agent names to info dicts
         """
-        if options is None:
-            options = {}
-
-        main_rng = np.random.default_rng(seed)
-
-        obs_seed = options.get("seed_obstacle", None)
-        pos_seed = options.get("seed_position", None)
-
-        obstacle_rng = np.random.default_rng(obs_seed) if obs_seed is not None else main_rng
-        position_rng = np.random.default_rng(pos_seed) if pos_seed is not None else main_rng
 
         # Generate obstacles and initialize robots
         self.obstacles = self._generate_random_obstacles(
             num_obstacles=self.num_obstacles,
             min_size=self.obstacles_size_range[0],
             max_size=self.obstacles_size_range[1],
-            rng=obstacle_rng
+            rng=self.obstacle_rng
         )
         
-        self._initialize_robots(rng=position_rng, robot_configs=self.robot_configs)
+        self._initialize_robots(rng=self.position_rng, robot_configs=self.robot_configs)
         
         # Reset environment state
         self.agents = self.possible_agents[:]

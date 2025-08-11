@@ -2,11 +2,11 @@
 
 train_parameters:
   frames_per_batch: 2000
-  n_iters: 3
+  n_iters: 2
   #total_frames = frames_per_batch * n_iters
 
   # Training
-  num_epochs: 30
+  num_epochs: 10
   minibatch_size: 400
   lr: !!float 3e-4
   max_steps: 1000
@@ -19,6 +19,10 @@ train_parameters:
   gamma: 0.99
   lmbda: 0.9
   entropy_eps: !!float 1e-4
+
+  # Seeding
+  rng_seed: 42 # Base seed for creating the environment, reset() will continue drawing from the same RNG sequence across episodes
+  eval_seed: 100 # Seed for evaluation runs, to ensure reproducibility
 
 general_inputs:
   map_size: [500, 300]

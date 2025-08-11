@@ -2,7 +2,7 @@
 import torch
 
 # Tensordict modules
-from tensordict.nn import set_composite_lp_aggregate, TensorDictModule
+from tensordict.nn import set_composite_lp_aggregate, TensorDictModule, TensorDictSequential
 from tensordict.nn.distributions import NormalParamExtractor
 from torch import multiprocessing
 
@@ -13,7 +13,7 @@ from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
 
 # Env
-from torchrl.envs import RewardSum, TransformedEnv
+from torchrl.envs import RewardSum, TransformedEnv, ParallelEnv
 from torchrl.envs.libs.pettingzoo import PettingZooWrapper
 from torchrl.envs.utils import check_env_specs
 
@@ -71,14 +71,15 @@ policy_share_params = config['train_parameters']['policy_share_params']
 # Use MAPPO (centralized critic in each type of agent)
 mappo = True
 
-reset_options = {"seed_obstacle": 420, "seed_position": 240}
+rng_seed = config['train_parameters']['rng_seed']
+eval_seed = config['train_parameters']['eval_seed']
 
 # ==============================================================================
 # HETEROGENEOUS AGENT SETUP
 # ==============================================================================
 
 # Import custom environment
-env = MultiRobotParallelEnv(max_steps=max_steps)
+env = MultiRobotParallelEnv(seed=rng_seed, max_steps=max_steps)
 
 # CREATE HETEROGENEOUS GROUPS
 # Method 1: Group by robot type (UAV vs UGV)
@@ -264,48 +265,27 @@ for group_name in group_map.keys():
     combined_critic_modules[group_name] = critics[group_name]
 
 # Create combined policy and critic
-from tensordict.nn import TensorDictSequential
+def HeterogeneousPolicy(policies):
+    """Combines multiple policies into a single module."""
+    return TensorDictSequential(*[policies[group_name] for group_name in policies.keys()])
 
-# Method 1: Simple combination - each policy acts independently
-class HeterogeneousPolicy(torch.nn.Module):
-    def __init__(self, policies):
-        super().__init__()
-        self.policies = torch.nn.ModuleDict(policies)
-    
-    def forward(self, tensordict):
-        out = tensordict.empty()
-        for group_name, policy in self.policies.items():
-            if (group_name, "observation") in tensordict.keys(True):
-                group_output = policy(tensordict.select(group_name))
-                out.update(group_output)
-        return out
-
-class HeterogeneousCritic(torch.nn.Module):
-    def __init__(self, critics):
-        super().__init__()
-        self.critics = torch.nn.ModuleDict(critics)
-    
-    def forward(self, tensordict):
-        out = tensordict.empty()
-        for group_name, critic in self.critics.items():
-            if (group_name, "observation") in tensordict.keys(True):
-                group_output = critic(tensordict.select(group_name))
-                out.update(group_output)
-        return out
+def HeterogeneousCritic(critics):
+    """Combines multiple critics into a single module."""
+    return TensorDictSequential(*[critics[group_name] for group_name in critics.keys()])
 
 # Create combined modules
 combined_policy = HeterogeneousPolicy(policies)
 combined_critic = HeterogeneousCritic(critics)
 
 # print("\nTesting heterogeneous networks:")
-reset_data = env.reset(options=reset_options).to(device)
+reset_data = env.reset().to(device)
 # print("Reset data keys:", reset_data.keys(True))
 
-policy_output = combined_policy(reset_data)
-print("Policy output keys:", policy_output.keys(True))
+# policy_output = combined_policy(reset_data)
+# print("Policy output keys:", policy_output.keys(True))
 
-critic_output = combined_critic(reset_data)
-print("Critic output keys:", critic_output.keys(True))
+# critic_output = combined_critic(reset_data)
+# print("Critic output keys:", critic_output.keys(True))
 
 # ==============================================================================
 # TRAINING SETUP WITH PARAMETER SHARING WITHIN GROUPS
@@ -412,8 +392,8 @@ def train_heterogeneous_agents():
         # Compute GAE for each group
         for group_name in group_map.keys():
             loss_module = loss_modules[group_name]
-            # advantage_module = advantage_modules[group_name]
-            # advantage_module(tensordict_data)
+            advantage_module = advantage_modules[group_name]
+            advantage_module(tensordict_data)
         
         data_view = tensordict_data.reshape(-1)
         replay_buffer.extend(data_view.cpu())
@@ -498,10 +478,10 @@ if __name__ == "__main__":
     
     # Demonstrate parameter sharing
     print("\n4. PARAMETER SHARING VERIFICATION:")
-    env_test = MultiRobotParallelEnv(max_steps=max_steps)
+    env_test = MultiRobotParallelEnv(seed=eval_seed, max_steps=max_steps)
     #group_map_test = create_heterogeneous_group_map(env_test)
     env_test = PettingZooWrapper(env=env_test, group_map=group_map)
-    env_test.reset(options={"seed_obstacle": 42, "seed_position": 100})
+    env_test.reset()
     
     # Plot results
     plt.figure(figsize=(10, 6))
