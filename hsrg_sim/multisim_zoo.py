@@ -588,6 +588,15 @@ class MultiRobotParallelEnv(ParallelEnv):
             # Draw lidar rays
             ray_distances = robot.raycast_distances(self.obstacles, robot.pos, self.robots, robot.view_range)
             self.add_raycast_to_fig(self.ax, robot.pos, ray_distances)
+            
+            # Draw trajectories
+            for robot in self.robots:
+                if robot.traj:
+                    traj = np.array(robot.traj)
+                    if robot.type == 'UGV':
+                        self.ax.plot(traj[:, 0], traj[:, 1], 'b-', alpha=0.1, linewidth=1.5)
+                    elif robot.type == 'UAV':
+                        self.ax.plot(traj[:, 0], traj[:, 1], 'r-', alpha=0.1, linewidth=1.5)
 
     def close(self):
         """Close the environment"""
