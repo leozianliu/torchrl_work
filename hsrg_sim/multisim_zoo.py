@@ -135,20 +135,20 @@ class Robot:
     def take_action(self, action, robots, enable_obstacle_check=True, obstacles=None, obstacles_size_range=None):
         # Action is a 2D vector representing movement direction
         action = np.clip(action, -1, 1)  # Normalize action to [-1, 1]
-        action_scaling = 2.0
+        action_scaling = 5.0
         if action_scaling >= obstacles_size_range[0]:
             raise ValueError("Action scaling must be smaller than the minimum obstacle size, or it can jump across the obstacles")
-        next_pos = self.pos + action * action_scaling # Scale action to reasonable step size
+        self.next_pos = self.pos + action * action_scaling # Scale action to reasonable step size
         
-        x, y = int(next_pos[0]), int(next_pos[1])
+        x, y = int(self.next_pos[0]), int(self.next_pos[1])
         if enable_obstacle_check and self.type == 'UGV':
-            if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1] and not self.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0):
-                self.pos = next_pos
+            if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1] and not self.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0):
+                self.pos = self.next_pos
         elif enable_obstacle_check and self.type == 'UAV': # Drones can fly over obstacles but not out of map
             if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
-                self.pos = next_pos
+                self.pos = self.next_pos
         else:
-            self.pos = next_pos
+            self.pos = self.next_pos
             
         self.traj.append(self.pos.copy())
         
@@ -195,7 +195,7 @@ class Robot:
         # Collision penalty
         x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
-            if Robot.check_obstacle_collision(self.pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
+            if Robot.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
                 reward -= 1.0  # Penalty for collision with obstacles
                 
         # Inter-robot distance penalty
@@ -583,7 +583,7 @@ class MultiRobotParallelEnv(ParallelEnv):
             # Draw ranges and goals
             self.ax.add_patch(patches.Circle(robot.pos, robot.view_range, fill=False, linestyle='--', alpha=0.3))
             self.ax.add_patch(patches.Circle(robot.pos, robot.comm_range, fill=False, linestyle=':', color='green', alpha=0.2))
-            self.ax.plot(robot.goal[0], robot.goal[1], 'kx')
+            self.ax.plot(robot.goal[0], robot.goal[1], 'kx', markersize=15)
             
             # Draw lidar rays
             ray_distances = robot.raycast_distances(self.obstacles, robot.pos, self.robots, robot.view_range)
@@ -621,10 +621,10 @@ if __name__ == "__main__":
     
     def example_with_video_pz():
         """Example with video recording using PettingZoo"""
-        env = MultiRobotParallelEnv(render_mode='human')
+        env = MultiRobotParallelEnv(seed=420, render_mode='human')
         env.start_video_recording('pettingzoo_simulation.mp4')
         
-        observations, infos = env.reset(options={"seed_obstacle": 420, "seed_position": 240})
+        observations, infos = env.reset()
         
         try:
             for step in range(200):
@@ -639,7 +639,7 @@ if __name__ == "__main__":
             env.close()
     
     # Test the environment
-    env = MultiRobotParallelEnv()
+    env = MultiRobotParallelEnv(seed=420, render_mode='human')
     print(f"Environment created with agents: {env.possible_agents}")
     print(f"Action spaces: {[env.action_space(agent) for agent in env.possible_agents]}")
     print(f"Observation spaces: {[env.observation_space(agent) for agent in env.possible_agents]}")

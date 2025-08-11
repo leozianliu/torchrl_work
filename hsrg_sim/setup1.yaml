@@ -3,7 +3,7 @@
 train_parameters:
   frames_per_batch: 3000
   n_iters: 2
-  num_envs: 69
+  num_envs: 5
   #total_frames = frames_per_batch * n_iters
 
   # Training
@@ -28,9 +28,9 @@ train_parameters:
 general_inputs:
   map_size: [500, 300]
   num_obstacles: 200
-  obstacles_size_range: [5, 10] # Range of obstacle sizes
+  obstacles_size_range: [6, 12] # Range of obstacle sizes
   max_neighbors: 0 # Maximum number of neighbors each robot could observe
-  view_range_ugv: 20
+  view_range_ugv: 5
   view_range_uav: 30
 
 robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
@@ -57,4 +57,10 @@ robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
   - #id: 5
     type: 'UAV'
   - #id: 6
-    type: 'UAV'
+    type: 'UGV'
+  - #id: 7
+    type: 'UGV'
+  - #id: 8
+    type: 'UGV'
+  - #id: 9
+    type: 'UGV'
