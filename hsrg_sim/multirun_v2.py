@@ -37,7 +37,7 @@ device = (
     if torch.cuda.is_available() and not is_fork
     else torch.device("cpu")
 )
-data_device = torch.device("cpu")  # Use CPU for data collection
+#data_device = torch.device("cpu")  # Use CPU for data collection
 
 config = Helper.read_yaml_config("hsrg_sim/setup1.yaml")
 
@@ -58,8 +58,6 @@ clip_epsilon = config['train_parameters']['clip_epsilon']
 gamma = config['train_parameters']['gamma']
 lmbda = config['train_parameters']['lmbda']
 entropy_eps = config['train_parameters']['entropy_eps']
-print(type(entropy_eps))
-print('-------------------------')
 
 # disable log-prob aggregation
 set_composite_lp_aggregate(False).set()
@@ -74,6 +72,11 @@ mappo = True
 
 rng_seed = config['train_parameters']['rng_seed']
 eval_seed = config['train_parameters']['eval_seed']
+
+if frames_per_batch // num_envs > max_steps:
+    raise ValueError(
+        f"Frames_per_batch divided by num_envs must be greater than max_steps, or each environment will run more than one rollout, which cannot be handled by GAE properly."
+    )
 
 # ==============================================================================
 # HETEROGENEOUS AGENT SETUP
@@ -105,9 +108,7 @@ def create_heterogeneous_group_map(env):
         
     return group_map
 
-# Choose your grouping method
-# group_map = create_heterogeneous_group_map(env)
-# print(f"Heterogeneous group map: {group_map}")
+# Create group mapping
 group_map = None
 def make_env(worker_id):
     def _make():
@@ -120,7 +121,7 @@ def make_env(worker_id):
         return wrapped_env
     return _make
 
-# Need to put the main code in a function to avoid issues with multiprocessing (main calls itself)
+# Need to put the main code in __main__ to avoid issues with multiprocessing (main calls itself)
 if __name__ == "__main__":
 
     make_env_lst = [make_env(worker) for worker in range(num_envs)]
@@ -138,16 +139,12 @@ if __name__ == "__main__":
     # print("Available reward keys:", env.full_reward_spec)
 
     # Create RewardSum transform for each group's reward
-    reward_transforms = []
-    for group_name in group_map.keys():
-        reward_key = (group_name, "reward")
-        episode_reward_key = (group_name, "episode_reward")
-        reward_transforms.append(
-            RewardSum(in_keys=[reward_key], out_keys=[episode_reward_key])
-        )
+    reward_transform1 = RewardSum(in_keys=[("uav", "reward")], out_keys=[("uav", "episode_reward")])
+    reward_transform2 = RewardSum(in_keys=[("ugv", "reward")], out_keys=[("ugv", "episode_reward")])
 
     # Apply all reward transforms
-    env = TransformedEnv(env, *reward_transforms)
+    env = TransformedEnv(env, reward_transform1)
+    env = TransformedEnv(env, reward_transform2)
 
     # print("Environment specs after grouping:")
     # print(f"Observation spec: {env.observation_spec}")
@@ -279,14 +276,6 @@ if __name__ == "__main__":
     # COMBINE HETEROGENEOUS NETWORKS
     # ==============================================================================
 
-    # Combine all policies into one module
-    combined_policy_modules = {}
-    combined_critic_modules = {}
-
-    for group_name in group_map.keys():
-        combined_policy_modules[group_name] = policies[group_name]
-        combined_critic_modules[group_name] = critics[group_name]
-
     # Create combined policy and critic
     def HeterogeneousPolicy(policies):
         """Combines multiple policies into a single module."""
@@ -302,13 +291,6 @@ if __name__ == "__main__":
 
     # print("\nTesting heterogeneous networks:")
     reset_data = env.reset().to(device)
-    # print("Reset data keys:", reset_data.keys(True))
-
-    # policy_output = combined_policy(reset_data)
-    # print("Policy output keys:", policy_output.keys(True))
-
-    # critic_output = combined_critic(reset_data)
-    # print("Critic output keys:", critic_output.keys(True))
 
     # ==============================================================================
     # TRAINING SETUP WITH PARAMETER SHARING WITHIN GROUPS
@@ -332,15 +314,20 @@ if __name__ == "__main__":
     print(f"\nTOTAL MODEL PARAMETERS: {total_params:,}")
     print("="*60)
 
+    def actor_critic(tensordict): # Use this instead of combined_policy to use value modules too
+        tensordict = combined_policy(tensordict)
+        tensordict = combined_critic(tensordict)
+        return tensordict
+
     collector = SyncDataCollector(
         env,
-        combined_policy,
-        device=data_device,
+        actor_critic,
+        device=device,
         storing_device=device,
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
     )
-
+    
     replay_buffer = ReplayBuffer(
         storage=LazyTensorStorage(frames_per_batch, device=device),
         sampler=SamplerWithoutReplacement(),
@@ -370,9 +357,33 @@ if __name__ == "__main__":
             terminated=(group_name, "terminated"),
         )
         
+        class CustomGAE(GAE):
+            def set_keys(self, advantage_key=None, **kwargs):
+                if advantage_key is not None:
+                    self.advantage_key = advantage_key  # Skip validation (accepts tuples)
+                super().set_keys(**kwargs)  # Normal validation for other keys
+        
         advantage_module = GAE(
-            gamma=gamma, lmbda=lmbda, value_network=critics[group_name], average_gae=True
+            gamma=gamma,
+            lmbda=lmbda, 
+            value_network=critics[group_name], 
+            average_gae=True, 
+            time_dim=1 # Tensor(shape=torch.Size([workers, t_steps, n_agnets, n_features])
         )
+        
+        advantage_module.set_keys(
+            advantage_key=(group_name, "advantage"),
+            value_key=(group_name, "state_value"),
+            value_target_key=(group_name, "value_target"),
+            reward_key=("next", group_name, "reward"),
+            done_key=("next", group_name, "done"),
+            terminated_key=("next", group_name, "terminated"),
+        )
+        
+        advantage_module.advantage = (group_name, "advantage")
+        advantage_module.value = (group_name, "value")
+        advantage_module.value_target = (group_name, "next_state_value")
+        advantage_module.reward = ("next", group_name, "reward")
         
         # Separate optimizer for each group
         optimizer = torch.optim.Adam(loss_module.parameters(), lr)
@@ -380,8 +391,6 @@ if __name__ == "__main__":
         loss_modules[group_name] = loss_module
         optimizers[group_name] = optimizer
         advantage_modules[group_name] = advantage_module
-
-    print(f"\nCreated {len(loss_modules)} separate loss modules for groups: {list(loss_modules.keys())}")
 
     # ==============================================================================
     # TRAINING LOOP WITH HETEROGENEOUS AGENTS

@@ -187,8 +187,6 @@ pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
 
 episode_reward_mean_list = []
 for tensordict_data in collector:
-    print(tensordict_data)
-    print('--------------------')
     tensordict_data.set(
         ("next", "agents", "done"),
         tensordict_data.get(("next", "done"))
@@ -209,6 +207,8 @@ for tensordict_data in collector:
             params=loss_module.critic_network_params,
             target_params=loss_module.target_critic_network_params,
         )  # Compute GAE and add it to the data
+    print(tensordict_data)
+    print('--------------------')
 
     data_view = tensordict_data.reshape(-1)  # Flatten the batch size to shuffle data
     replay_buffer.extend(data_view)
