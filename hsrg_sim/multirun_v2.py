@@ -21,8 +21,7 @@ from torchrl.envs.utils import check_env_specs
 from torchrl.modules import MultiAgentMLP, ProbabilisticActor, TanhNormal
 
 # Loss
-from torchrl.objectives import ClipPPOLoss
-from torchrl.objectives.value import GAE
+from torchrl.objectives import ClipPPOLoss, LossModule, ValueEstimators
 
 # Utils
 from matplotlib import pyplot as plt
@@ -352,45 +351,27 @@ if __name__ == "__main__":
         loss_module.set_keys(
             reward=(group_name, "reward"),
             action=(group_name, "action"),
-            value=(group_name, "state_value"),
             done=(group_name, "done"),
             terminated=(group_name, "terminated"),
+            advantage=(group_name, "advantage"),
+            value_target=(group_name, "value_target"),
+            value=(group_name, "state_value"),
+            sample_log_prob=(group_name, "log_prob"),
         )
         
-        class CustomGAE(GAE):
-            def set_keys(self, advantage_key=None, **kwargs):
-                if advantage_key is not None:
-                    self.advantage_key = advantage_key  # Skip validation (accepts tuples)
-                super().set_keys(**kwargs)  # Normal validation for other keys
-        
-        advantage_module = GAE(
-            gamma=gamma,
-            lmbda=lmbda, 
-            value_network=critics[group_name], 
-            average_gae=True, 
-            time_dim=1 # Tensor(shape=torch.Size([workers, t_steps, n_agnets, n_features])
+        loss_module.make_value_estimator(
+            ValueEstimators.GAE,
+            gamma=gamma, 
+            lmbda=lmbda,
+            average_gae=True,  # Average GAE across agents in this group
+            time_dim=1,  # Time dimension is the first one in the tensordict
         )
-        
-        advantage_module.set_keys(
-            advantage_key=(group_name, "advantage"),
-            value_key=(group_name, "state_value"),
-            value_target_key=(group_name, "value_target"),
-            reward_key=("next", group_name, "reward"),
-            done_key=("next", group_name, "done"),
-            terminated_key=("next", group_name, "terminated"),
-        )
-        
-        advantage_module.advantage = (group_name, "advantage")
-        advantage_module.value = (group_name, "value")
-        advantage_module.value_target = (group_name, "next_state_value")
-        advantage_module.reward = ("next", group_name, "reward")
-        
+    
         # Separate optimizer for each group
         optimizer = torch.optim.Adam(loss_module.parameters(), lr)
         
         loss_modules[group_name] = loss_module
         optimizers[group_name] = optimizer
-        advantage_modules[group_name] = advantage_module
 
     # ==============================================================================
     # TRAINING LOOP WITH HETEROGENEOUS AGENTS
@@ -421,11 +402,13 @@ if __name__ == "__main__":
                         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
                     )
             
-            # Compute GAE for each group
-            for group_name in group_map.keys():
-                loss_module = loss_modules[group_name]
-                advantage_module = advantage_modules[group_name]
-                advantage_module(tensordict_data)
+            with torch.no_grad():
+                GAE = loss_modules[group_name].value_estimator
+                GAE(
+                    tensordict_data['next'][group_name],
+                    params=loss_modules[group_name].critic_network_params,
+                    target_params=loss_modules[group_name].target_critic_network_params,
+                )  # Compute GAE and add it to the data
             
             data_view = tensordict_data.reshape(-1)
             replay_buffer.extend(data_view.cpu())
