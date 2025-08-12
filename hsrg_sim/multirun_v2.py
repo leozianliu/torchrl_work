@@ -2,6 +2,7 @@
 import torch
 
 # Tensordict modules
+from tensordict import TensorDict
 from tensordict.nn import set_composite_lp_aggregate, TensorDictModule, TensorDictSequential
 from tensordict.nn.distributions import NormalParamExtractor
 from torch import multiprocessing
@@ -376,39 +377,77 @@ if __name__ == "__main__":
     # ==============================================================================
     # TRAINING LOOP WITH HETEROGENEOUS AGENTS
     # ==============================================================================
+    
+    def split_tensordict(original_td, agent_type):
+        """Split TensorDict with UAV/UGV data into separate agent TensorDict."""
+        
+        # Create the next TensorDict using only keyword arguments
+        next_dict = TensorDict(
+            batch_size=original_td["next"].batch_size,
+            device=original_td["next"].device,
+            is_shared=original_td["next"].is_shared
+        )
+        next_dict["done"] = original_td["next"]["done"]
+        next_dict["terminated"] = original_td["next"]["terminated"]
+        next_dict["truncated"] = original_td["next"]["truncated"]
+        next_dict["agents"] = original_td["next"][agent_type]
+        
+        # Create the main TensorDict using only keyword arguments
+        agent_td = TensorDict(
+            batch_size=original_td.batch_size,
+            device=original_td.device,
+            is_shared=original_td.is_shared
+        )
+        agent_td["collector"] = original_td["collector"]
+        agent_td["done"] = original_td["done"]
+        agent_td["terminated"] = original_td["terminated"]
+        agent_td["truncated"] = original_td["truncated"]
+        agent_td["agents"] = original_td[agent_type]
+        agent_td["next"] = next_dict
+        
+        return agent_td
 
     def train_heterogeneous_agents():
         pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
         episode_reward_mean_list = []
         
         for tensordict_data in collector:
-            print(tensordict_data)
+            # print(tensordict_data)
+            # print('-'*80)
+            tensordict_split_dict = {}
+            tensordict_split_dict['uav'] = split_tensordict(tensordict_data, 'uav')
+            tensordict_split_dict['ugv'] = split_tensordict(tensordict_data, 'ugv')
+            print(tensordict_split_dict['uav'])
+            print('-'*80)
+            print(tensordict_split_dict['ugv'])
             print('-'*80)
             # Prepare data for each group
             for group_name in group_map.keys():
                 # Expand done and terminated for this group
-                if ("next", group_name, "done") not in tensordict_data.keys(True):
-                    tensordict_data.set(
-                        ("next", group_name, "done"),
-                        tensordict_data.get(("next", "done"))
-                        .unsqueeze(-1)
-                        .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
-                    )
-                if ("next", group_name, "terminated") not in tensordict_data.keys(True):
-                    tensordict_data.set(
-                        ("next", group_name, "terminated"),
-                        tensordict_data.get(("next", "terminated"))
-                        .unsqueeze(-1)
-                        .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
-                    )
-            
-            with torch.no_grad():
-                GAE = loss_modules[group_name].value_estimator
-                GAE(
-                    tensordict_data['next'][group_name],
-                    params=loss_modules[group_name].critic_network_params,
-                    target_params=loss_modules[group_name].target_critic_network_params,
-                )  # Compute GAE and add it to the data
+                # if ("next", "agents", "done") not in tensordict_data.keys(True):
+                #     tensordict_data.set(
+                #         ("next", group_name, "done"),
+                #         tensordict_data.get(("next", "done"))
+                #         .unsqueeze(-1)
+                #         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
+                #     )
+                # if ("next", group_name, "terminated") not in tensordict_data.keys(True):
+                #     tensordict_data.set(
+                #         ("next", group_name, "terminated"),
+                #         tensordict_data.get(("next", "terminated"))
+                #         .unsqueeze(-1)
+                #         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
+                #     )
+
+                with torch.no_grad():
+                    GAE = loss_modules[group_name].value_estimator
+                    GAE(
+                        tensordict_split_dict[group_name],
+                        params=loss_modules[group_name].critic_network_params,
+                        target_params=loss_modules[group_name].target_critic_network_params,
+                    )  # Compute GAE and add it to the data
+                    
+            tensordict_data = TensorDict(uav=tensordict_split_dict['uav'], ugv=tensordict_split_dict['ugv'])
             
             data_view = tensordict_data.reshape(-1)
             replay_buffer.extend(data_view.cpu())
