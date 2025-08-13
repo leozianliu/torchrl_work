@@ -423,19 +423,12 @@ if __name__ == "__main__":
             # print('-'*80)
             # Prepare data for each group
             for group_name in group_map.keys():
-            #     # Expand done and terminated for this group
+                # Need to add state_value to next alongside observation foor GAE
                 if ("next", group_name, "state_value") not in tensordict_data.keys(True):
                     tensordict_data.set(
                         ("next", group_name, "state_value"),
                         tensordict_data.get((group_name, "state_value"))
                     )
-                # if ("next", group_name, "terminated") not in tensordict_data.keys(True):
-                #     tensordict_data.set(
-                #         ("next", group_name, "terminated"),
-                #         tensordict_data.get(("next", "terminated"))
-                #         .unsqueeze(-1)
-                #         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
-                #     )
                 
                 with torch.no_grad():
                     GAE = loss_modules[group_name].value_estimator
@@ -447,6 +440,7 @@ if __name__ == "__main__":
                 
                 tensordict_split_dict[group_name] = tensordict_split_dict[group_name].reshape(-1)  # Flatten the batch size [n_envs, t_steps] -> [n_frames] to shuffle data
             
+            # Combine tensordicts for each group into a single tensordict for random minibatch sampling
             data_view = TensorDict(uav=tensordict_split_dict['uav'], ugv=tensordict_split_dict['ugv'], batch_size=[frames_per_batch])
             replay_buffer.extend(data_view.cpu())
             
@@ -463,11 +457,7 @@ if __name__ == "__main__":
                         optimizer = optimizers[group_name]
                         
                         # Extract data for this group
-                        group_subdata = subdata[group_name] #.select(group_name)
-                        # group_data[(group_name, "reward")] = group_data[("next", group_name, "reward")]
-                        print(group_subdata)
-                        # print("Expected reward key:", loss_module.value_estimator.reward_key)
-   
+                        group_subdata = subdata[group_name]
                         
                         if group_subdata.numel() > 0:  # Check if group has data
                             loss_vals = loss_module(group_subdata)  # Pass full data, loss module will extract what it needs
@@ -553,10 +543,10 @@ if __name__ == "__main__":
     
     env_test.start_video_recording('hsrg_sim/marl_simulation.mp4')
     frames = []
-    print("\n5. Rendering final policy...")
+    print("\n5. Rendering rollout for final training evaluation...")
     with torch.no_grad():
         env_test.rollout(
-            max_steps=100,
+            max_steps=1000,
             policy=combined_policy,
             callback=render_callback,
             auto_cast_to_device=True,

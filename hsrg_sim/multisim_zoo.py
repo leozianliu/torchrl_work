@@ -44,6 +44,8 @@ class Robot:
         view_range_uav = config['general_inputs']['view_range_uav']
         self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
         self.obstacle_matrix = None
+        # Known recorded distance for reward calculation
+        self.dist_to_goal_min = -1
 
     def get_state(self, obstacles, robots): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
@@ -153,7 +155,7 @@ class Robot:
         self.traj.append(self.pos.copy())
         
         # Check if goal is reached
-        if np.linalg.norm(self.pos - self.goal) < 0.1:
+        if np.linalg.norm(self.pos - self.goal) < 0.5:
             self.reached_goal = True
             
         return self.get_reward(robots, obstacles)
@@ -188,15 +190,21 @@ class Robot:
         
         reward = 0
         
-        # Distance reward
+        # Delta distance reward
         dist_to_goal = np.linalg.norm(self.pos - self.goal)
-        reward -= dist_to_goal * 0.1  # Penalize distance to goal
+        if self.dist_to_goal_min < 0:
+            reward += 0
+            self.dist_to_goal_min = dist_to_goal
+        elif dist_to_goal < self.dist_to_goal_min:
+            delta_dist = self.dist_to_goal_min - dist_to_goal
+            self.dist_to_goal_min = dist_to_goal
+            reward += delta_dist * 0.1  # Reward the agent if it finds a shorter path to its goal
         
         # Collision penalty
         x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
             if Robot.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
-                reward -= 1.0  # Penalty for collision with obstacles
+                reward -= 0.5  # Penalty for collision with obstacles
                 
         # Inter-robot distance penalty
         interdist_reward = calculate_total_interdist_reward(robots)
@@ -204,7 +212,7 @@ class Robot:
         
         # Goal reached reward
         if self.reached_goal:
-            reward += 10.0
+            reward += 1000.0
         
         # Cooperation reward (if sharing information with neighbors)
         if len(self.neighbors) > 0:
