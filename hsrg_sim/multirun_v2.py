@@ -357,7 +357,7 @@ if __name__ == "__main__":
             advantage=(group_name, "advantage"),
             value_target=(group_name, "value_target"),
             value=(group_name, "state_value"),
-            sample_log_prob=(group_name, "log_prob"),
+            sample_log_prob=(group_name, "action_log_prob"),
         )
         
         loss_module.make_value_estimator(
@@ -463,14 +463,14 @@ if __name__ == "__main__":
                         optimizer = optimizers[group_name]
                         
                         # Extract data for this group
-                        group_data = subdata[group_name] #.select(group_name)
-                        group_data.rename_key(group_name, "agents")
-                        group_data.rename_key(("next", group_name), ("next", "agents"))
-                        print(group_data)
-                        # exit()
+                        group_subdata = subdata[group_name] #.select(group_name)
+                        # group_data[(group_name, "reward")] = group_data[("next", group_name, "reward")]
+                        print(group_subdata)
+                        # print("Expected reward key:", loss_module.value_estimator.reward_key)
+   
                         
-                        if group_data.numel() > 0:  # Check if group has data
-                            loss_vals = loss_module(subdata)  # Pass full data, loss module will extract what it needs
+                        if group_subdata.numel() > 0:  # Check if group has data
+                            loss_vals = loss_module(group_subdata)  # Pass full data, loss module will extract what it needs
                             
                             loss_value = (
                                 loss_vals["loss_objective"]

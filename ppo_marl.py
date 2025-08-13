@@ -178,6 +178,9 @@ loss_module.set_keys(  # We have to tell the loss where to find the keys; since 
     terminated=("agents", "terminated"),
 )
 
+print(env.reward_key)
+print('--------------------------')
+
 loss_module.make_value_estimator(ValueEstimators.GAE, gamma=gamma, lmbda=lmbda)  # We build GAE
 GAE = loss_module.value_estimator
 
