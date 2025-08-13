@@ -160,6 +160,10 @@ if __name__ == "__main__":
     networks = {}
     policies = {}
     critics = {}
+    
+    print("="*80)
+    print("GROUP MAPPING")
+    print("="*80)
 
     for group_name in group_map.keys():
         # Get specs for this group
@@ -188,7 +192,7 @@ if __name__ == "__main__":
                     device=device,
                     depth=2,  # Deeper network for UAVs
                     num_cells=256,  # Larger network for UAVs
-                    activation_class=torch.nn.Tanh,
+                    activation_class=torch.nn.ReLU,
                 ),
                 NormalParamExtractor(),
             )
@@ -244,7 +248,7 @@ if __name__ == "__main__":
                 device=device,
                 depth=2,
                 num_cells=256,
-                activation_class=torch.nn.Tanh,
+                activation_class=torch.nn.ReLU,
             )
             print(f"  UAV critic parameters: {sum(p.numel() for p in critic_net.parameters())}")
         else:  # UGV
@@ -295,24 +299,6 @@ if __name__ == "__main__":
     # ==============================================================================
     # TRAINING SETUP WITH PARAMETER SHARING WITHIN GROUPS
     # ==============================================================================
-
-    print("\n" + "="*60)
-    print("PARAMETER SHARING SUMMARY:")
-    print("="*60)
-    total_params = 0
-    for group_name in group_map.keys():
-        policy_params = sum(p.numel() for p in policies[group_name].parameters())
-        critic_params = sum(p.numel() for p in critics[group_name].parameters()) 
-        group_total = policy_params + critic_params
-        total_params += group_total
-        
-        print(f"{group_name.upper()} group:")
-        print(f"  - Number of agents: {len(group_map[group_name])}")
-        print(f"  - Policy parameters: {policy_params:,} (shared among all {group_name} agents)")
-        print(f"  - Critic parameters: {critic_params:,} (shared among all {group_name} agents)")
-        print(f"  - Total {group_name} parameters: {group_total:,}")
-    print(f"\nTOTAL MODEL PARAMETERS: {total_params:,}")
-    print("="*60)
 
     def actor_critic(tensordict): # Use this instead of combined_policy to use value modules too
         tensordict = combined_policy(tensordict)
@@ -412,15 +398,10 @@ if __name__ == "__main__":
         episode_reward_mean_list = []
         
         for tensordict_data in collector:
-            # print(tensordict_data)
-            # print('-'*80)
             tensordict_split_dict = {}
             tensordict_split_dict['uav'] = split_tensordict(tensordict_data, 'uav')
             tensordict_split_dict['ugv'] = split_tensordict(tensordict_data, 'ugv')
-            # print(tensordict_split_dict['uav'])
-            # print('-'*80)
-            # print(tensordict_split_dict['ugv'])
-            # print('-'*80)
+
             # Prepare data for each group
             for group_name in group_map.keys():
                 # Need to add state_value to next alongside observation foor GAE
@@ -512,8 +493,8 @@ if __name__ == "__main__":
     print("="*80)
     
     print("\n1. PARAMETER SHARING EXPLANATION:")
-    print("   - All UAV agents share the SAME neural network parameters")
-    print("   - All UGV agents share the SAME neural network parameters") 
+    print("   - All UAV agents share the SAME policy and critic network parameters")
+    print("   - All UGV agents share the SAME policy and critic network parameters") 
     
     print("\n2. Starting heterogeneous multi-agent training...")
     episode_rewards = train_heterogeneous_agents()
@@ -546,7 +527,7 @@ if __name__ == "__main__":
     print("\n5. Rendering rollout for final training evaluation...")
     with torch.no_grad():
         env_test.rollout(
-            max_steps=1000,
+            max_steps=max_steps,
             policy=combined_policy,
             callback=render_callback,
             auto_cast_to_device=True,
