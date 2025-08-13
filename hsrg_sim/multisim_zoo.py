@@ -44,8 +44,6 @@ class Robot:
         view_range_uav = config['general_inputs']['view_range_uav']
         self.view_range = view_range_ugv if robot_type == 'UGV' else view_range_uav
         self.obstacle_matrix = None
-        # Known recorded distance for reward calculation
-        self.dist_to_goal_min = -1
 
     def get_state(self, obstacles, robots): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
@@ -155,7 +153,7 @@ class Robot:
         self.traj.append(self.pos.copy())
         
         # Check if goal is reached
-        if np.linalg.norm(self.pos - self.goal) < 0.5:
+        if np.linalg.norm(self.pos - self.goal) < 1.1:  # Threshold for reaching goal
             self.reached_goal = True
             
         return self.get_reward(robots, obstacles)
@@ -180,25 +178,24 @@ class Robot:
             # Calculate inter-robot distance rewards
             interdist_reward = 0.0
             for i in range(len(robots)):
-                for j in range(i + 1, len(robots)):
-                    if robots[i].type == robots[j].type:  # Only consider distance between same type robots
-                        dist = np.linalg.norm(robots[i].pos - robots[j].pos)
+                if self.type == robots[i].type:  # Only consider distance between same type robots
+                    if self.id != robots[i].id:  # Don't calculate distance to self
+                        dist = np.linalg.norm(robots[i].pos - self.pos)
                         interdist_reward += interdist_to_reward(dist) # It's actually a penalty, sign is correct tho
-                    else:
-                        pass
+                else:
+                    pass
             return interdist_reward
         
         reward = 0
         
-        # Delta distance reward
-        dist_to_goal = np.linalg.norm(self.pos - self.goal)
-        if self.dist_to_goal_min < 0:
-            reward += 0
-            self.dist_to_goal_min = dist_to_goal
-        elif dist_to_goal < self.dist_to_goal_min:
-            delta_dist = self.dist_to_goal_min - dist_to_goal
-            self.dist_to_goal_min = dist_to_goal
-            reward += delta_dist * 0.1  # Reward the agent if it finds a shorter path to its goal
+        # Delta goal distance reward
+        dist_to_goal = np.linalg.norm(self.pos - self.goal) 
+        if not hasattr(self, 'dist_to_goal_prev'):
+            reward = reward
+        else:
+            delta_dist = self.dist_to_goal_prev - dist_to_goal
+            reward += delta_dist * 1
+        self.dist_to_goal_prev = dist_to_goal  # Update for next step
         
         # Collision penalty
         x, y = self.pos[0], self.pos[1]
@@ -212,7 +209,7 @@ class Robot:
         
         # Goal reached reward
         if self.reached_goal:
-            reward += 1000.0
+            reward += np.linalg.norm((MAP_SIZE[0], MAP_SIZE[1])) * 10 # Large reward for reaching the goal
         
         # Cooperation reward (if sharing information with neighbors)
         if len(self.neighbors) > 0:
