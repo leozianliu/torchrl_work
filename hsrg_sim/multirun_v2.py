@@ -33,7 +33,7 @@ from multisim_zoo import MultiRobotParallelEnv, Helper
 # Devices
 is_fork = multiprocessing.get_start_method() == "fork"
 device = (
-    torch.device(0)
+    torch.device(3)
     if torch.cuda.is_available() and not is_fork
     else torch.device("cpu")
 )
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     )
     
     replay_buffer = ReplayBuffer(
-        storage=LazyTensorStorage(frames_per_batch, device=device),
+        storage=LazyTensorStorage(frames_per_batch, device='cpu'),
         sampler=SamplerWithoutReplacement(),
         batch_size=minibatch_size,
     )
@@ -390,7 +390,7 @@ if __name__ == "__main__":
         next_dict["done"] = original_td["next"]["done"]
         next_dict["terminated"] = original_td["next"]["terminated"]
         next_dict["truncated"] = original_td["next"]["truncated"]
-        next_dict["agents"] = original_td["next"][agent_type]
+        next_dict[agent_type] = original_td["next"][agent_type]
         
         # Create the main TensorDict using only keyword arguments
         agent_td = TensorDict(
@@ -402,7 +402,7 @@ if __name__ == "__main__":
         agent_td["done"] = original_td["done"]
         agent_td["terminated"] = original_td["terminated"]
         agent_td["truncated"] = original_td["truncated"]
-        agent_td["agents"] = original_td[agent_type]
+        agent_td[agent_type] = original_td[agent_type]
         agent_td["next"] = next_dict
         
         return agent_td
@@ -417,20 +417,18 @@ if __name__ == "__main__":
             tensordict_split_dict = {}
             tensordict_split_dict['uav'] = split_tensordict(tensordict_data, 'uav')
             tensordict_split_dict['ugv'] = split_tensordict(tensordict_data, 'ugv')
-            print(tensordict_split_dict['uav'])
-            print('-'*80)
-            print(tensordict_split_dict['ugv'])
-            print('-'*80)
+            # print(tensordict_split_dict['uav'])
+            # print('-'*80)
+            # print(tensordict_split_dict['ugv'])
+            # print('-'*80)
             # Prepare data for each group
             for group_name in group_map.keys():
-                # Expand done and terminated for this group
-                # if ("next", "agents", "done") not in tensordict_data.keys(True):
-                #     tensordict_data.set(
-                #         ("next", group_name, "done"),
-                #         tensordict_data.get(("next", "done"))
-                #         .unsqueeze(-1)
-                #         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
-                #     )
+            #     # Expand done and terminated for this group
+                if ("next", group_name, "state_value") not in tensordict_data.keys(True):
+                    tensordict_data.set(
+                        ("next", group_name, "state_value"),
+                        tensordict_data.get((group_name, "state_value"))
+                    )
                 # if ("next", group_name, "terminated") not in tensordict_data.keys(True):
                 #     tensordict_data.set(
                 #         ("next", group_name, "terminated"),
@@ -438,7 +436,7 @@ if __name__ == "__main__":
                 #         .unsqueeze(-1)
                 #         .expand(tensordict_data.get_item_shape(("next", group_name, "reward"))),
                 #     )
-
+                
                 with torch.no_grad():
                     GAE = loss_modules[group_name].value_estimator
                     GAE(
@@ -446,14 +444,15 @@ if __name__ == "__main__":
                         params=loss_modules[group_name].critic_network_params,
                         target_params=loss_modules[group_name].target_critic_network_params,
                     )  # Compute GAE and add it to the data
-                    
-            tensordict_data = TensorDict(uav=tensordict_split_dict['uav'], ugv=tensordict_split_dict['ugv'])
+                
+                tensordict_split_dict[group_name] = tensordict_split_dict[group_name].reshape(-1)  # Flatten the batch size [n_envs, t_steps] -> [n_frames] to shuffle data
             
-            data_view = tensordict_data.reshape(-1)
+            data_view = TensorDict(uav=tensordict_split_dict['uav'], ugv=tensordict_split_dict['ugv'], batch_size=[frames_per_batch])
             replay_buffer.extend(data_view.cpu())
             
             # Training epochs
-            for epoch in range(num_epochs):
+            for epoch in range(num_epochs):           
+                
                 for batch in range(frames_per_batch // minibatch_size):
                     subdata = replay_buffer.sample().to(device)
                     
@@ -464,7 +463,11 @@ if __name__ == "__main__":
                         optimizer = optimizers[group_name]
                         
                         # Extract data for this group
-                        group_data = subdata.select(group_name)
+                        group_data = subdata[group_name] #.select(group_name)
+                        group_data.rename_key(group_name, "agents")
+                        group_data.rename_key(("next", group_name), ("next", "agents"))
+                        print(group_data)
+                        # exit()
                         
                         if group_data.numel() > 0:  # Check if group has data
                             loss_vals = loss_module(subdata)  # Pass full data, loss module will extract what it needs

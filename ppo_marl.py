@@ -211,6 +211,9 @@ for tensordict_data in collector:
     print('--------------------')
 
     data_view = tensordict_data.reshape(-1)  # Flatten the batch size to shuffle data
+    print(data_view)
+    print('--------------------')
+    exit()
     replay_buffer.extend(data_view)
 
     for _ in range(num_epochs):

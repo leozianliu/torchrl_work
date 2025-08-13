@@ -1,9 +1,9 @@
 # Config file for multirun_v1 and multisim_zoo
 
 train_parameters:
-  frames_per_batch: 5000
+  frames_per_batch: 2000
   n_iters: 2
-  num_envs: 5
+  num_envs: 2
   #total_frames = frames_per_batch * n_iters
 
   # Training
