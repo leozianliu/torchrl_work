@@ -523,7 +523,7 @@ if __name__ == "__main__":
                                             auto_cast_to_device=True,
                                             break_when_any_done=False,
                                         )
-        print(test_rollout)
+        
         uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
         ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
         print("="*80)

@@ -1,18 +1,12 @@
-import torch
+import numpy as np
 
-from torchrl.collectors import SyncDataCollector
-from torchrl.envs import GymEnv
-from torchrl.envs.utils import RandomPolicy
+def interdist_to_reward(bot_interdist): # Input: float
+    # Reward for distance to other robots
+    scaling = 0.334
+    bot_interdict = np.clip(bot_interdist, 0, 300)
+    interdist_rew_single = scaling * bot_interdict - 1 # -1 rew when robots collide, >=3 distance no penalty no reward
+    interdist_rew_single = min(0, interdist_rew_single)
+    # interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
+    return interdist_rew_single
 
-torch.manual_seed(0)
-
-env = GymEnv("CartPole-v1")
-env.set_seed(0)
-
-policy = RandomPolicy(env.action_spec)
-collector = SyncDataCollector(env, policy, frames_per_batch=200, total_frames=-1)
-
-for i, tensordict_data in enumerate(collector):
-    print(tensordict_data)
-    if i == 4:
-        break
+print(interdist_to_reward(-2))
