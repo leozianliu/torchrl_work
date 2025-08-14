@@ -48,13 +48,22 @@ class Robot:
     def get_state(self, obstacles, robots): # NOTE: local_map is obsolete and irrelevant to RL agents
         # State includes: position, goal, known_map around robot, neighbors' info
         #local_map = self.get_local_map()
-        neighbor_info = self.get_neighbor_info(self.max_neighbors)
-        return np.concatenate([
-            self.pos / np.asarray(MAP_SIZE),  # Normalized position
-            self.goal / np.asarray(MAP_SIZE),  # Normalized goal
-            self.raycast_distances(obstacles, self.pos, robots, self.view_range) / self.view_range,  # Local map information
-            neighbor_info  # Neighbor information
-        ])
+        #neighbor_info = self.get_neighbor_info(self.max_neighbors)
+        if self.type == 'UGV':
+            return_observation = np.concatenate([
+                                                    self.pos / np.asarray(MAP_SIZE),  # Normalized position
+                                                    self.goal / np.asarray(MAP_SIZE),  # Normalized goal
+                                                    self.raycast_distances(obstacles, self.pos, robots, self.view_range) / self.view_range  # Lidar information
+                                                    #neighbor_info  # Neighbor information
+                                                ])
+        elif self.type == 'UAV':
+            return_observation = np.concatenate([
+                                                    self.pos / np.asarray(MAP_SIZE),  # Normalized position
+                                                    self.goal / np.asarray(MAP_SIZE),  # Normalized goal
+                                                    self.raycast_distances(obstacles, self.pos, robots, self.view_range) / self.view_range  # Lidar information
+                                                    #neighbor_info  # Neighbor information
+                                                ])
+        return return_observation
 
     # def get_local_map(self, size=10):
     #     # Get local map around robot
@@ -165,26 +174,26 @@ class Robot:
         # 3. Goal reached
         # 4. Cooperation with neighbors
         
-        def interdist_to_reward(bot_interdist): # Input: float
-            # Reward for distance to other robots
-            scaling = 0.334
-            bot_interdict = np.clip(bot_interdist, 0, min(MAP_SIZE))
-            interdist_rew_single = scaling * bot_interdict - 1 # -1 rew when robots collide, >=3 distance no penalty no reward
-            interdist_rew_single = min(0, interdist_rew_single)
-            # interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
-            return interdist_rew_single
+        # def interdist_to_reward(bot_interdist): # Input: float
+        #     # Reward for distance to other robots
+        #     scaling = 0.334
+        #     bot_interdict = np.clip(bot_interdist, 0, min(MAP_SIZE))
+        #     interdist_rew_single = scaling * bot_interdict - 1 # -1 rew when robots collide, >=3 distance no penalty no reward
+        #     interdist_rew_single = min(0, interdist_rew_single)
+        #     # interdist_rew_single = - np.exp(- bot_interdist / (scaling * min(MAP_SIZE)))
+        #     return interdist_rew_single
         
-        def calculate_total_interdist_reward(robots):
-            # Calculate inter-robot distance rewards
-            interdist_reward = 0.0
-            for i in range(len(robots)):
-                if self.type == robots[i].type:  # Only consider distance between same type robots
-                    if self.id != robots[i].id:  # Don't calculate distance to self
-                        dist = np.linalg.norm(robots[i].pos - self.pos)
-                        interdist_reward += interdist_to_reward(dist) # It's actually a penalty, sign is correct tho
-                else:
-                    pass
-            return interdist_reward
+        # def calculate_total_interdist_reward(robots):
+        #     # Calculate inter-robot distance rewards
+        #     interdist_reward = 0.0
+        #     for i in range(len(robots)):
+        #         if self.type == robots[i].type:  # Only consider distance between same type robots
+        #             if self.id != robots[i].id:  # Don't calculate distance to self
+        #                 dist = np.linalg.norm(robots[i].pos - self.pos)
+        #                 interdist_reward += interdist_to_reward(dist) # It's actually a penalty, sign is correct tho
+        #         else:
+        #             pass
+        #     return interdist_reward
         
         reward = 0
         
@@ -194,7 +203,7 @@ class Robot:
             reward = reward
         else:
             delta_dist = self.dist_to_goal_prev - dist_to_goal
-            reward += delta_dist * 1
+            reward += delta_dist * np.linalg.norm((MAP_SIZE[0], MAP_SIZE[1])) / (self.dist_to_goal_prev + 1)#* 1
         self.dist_to_goal_prev = dist_to_goal  # Update for next step
         
         # Collision penalty
@@ -202,18 +211,20 @@ class Robot:
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
             if Robot.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
                 reward -= 0.5  # Penalty for collision with obstacles
+            else:
+                reward = reward
                 
-        # Inter-robot distance penalty
-        interdist_reward = calculate_total_interdist_reward(robots)
-        reward += interdist_reward  # Add inter-robot distance penalty
+        # # Inter-robot distance penalty
+        # interdist_reward = calculate_total_interdist_reward(robots)
+        # reward += interdist_reward  # Add inter-robot distance penalty
         
         # Goal reached reward
         if self.reached_goal:
             reward += np.linalg.norm((MAP_SIZE[0], MAP_SIZE[1])) * 10 # Large reward for reaching the goal
         
         # Cooperation reward (if sharing information with neighbors)
-        if len(self.neighbors) > 0:
-            reward += 0.1 * len(self.neighbors)
+        # if len(self.neighbors) > 0:
+        #     reward += 0.1 * len(self.neighbors)
             
         return reward
 
@@ -301,8 +312,29 @@ class MultiRobotParallelEnv(ParallelEnv):
         # Action and observation spaces for each agent
         self._action_spaces = {agent: spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32) 
                               for agent in self.possible_agents}
-        self._observation_spaces = {agent: spaces.Box(low=0, high=1, shape=(4+4*max_neighbors+18,), dtype=np.float32) 
-                                   for agent in self.possible_agents}
+        
+        self._observation_spaces = {}
+        for robot_index, config in enumerate(self.robot_configs):
+            robot_type = config.get('type')
+            if robot_type not in ['UAV', 'UGV']:
+                raise ValueError(f"Robot {robot_index} has invalid type: {robot_type}")
+            
+            if robot_type == 'UGV':
+                key = self.possible_agents[robot_index]
+                self._observation_spaces[key] = spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(22,),
+                    dtype=np.float32
+                )
+            elif robot_type == 'UAV':
+                key = self.possible_agents[robot_index]
+                self._observation_spaces[key] = spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(22,),
+                    dtype=np.float32
+                )
         
         # Rendering
         self.render_mode = render_mode
@@ -617,7 +649,7 @@ class MultiRobotParallelEnv(ParallelEnv):
             self.fig, self.ax = plt.subplots(figsize=np.array(MAP_SIZE)/20)
         
         self.video_writer = FFMpegWriter(fps=fps, bitrate=bitrate)
-        self.video_writer.setup(self.fig, filename, dpi=80)
+        self.video_writer.setup(self.fig, filename, dpi=40)
 
     def stop_video_recording(self):
         """Stop video recording"""

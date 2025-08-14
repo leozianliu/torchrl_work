@@ -70,7 +70,7 @@ max_steps = config['train_parameters']['max_steps']
 # Policy parameter sharing for same type agents
 policy_share_params = config['train_parameters']['policy_share_params']
 # Use MAPPO (centralized critic in each type of agent)
-mappo = False
+mappo = config['train_parameters']['centralized_critic']
 
 rng_seed = config['train_parameters']['rng_seed']
 eval_seed = config['train_parameters']['eval_seed']
@@ -182,7 +182,7 @@ if __name__ == "__main__":
                     share_params=policy_share_params,  # All UAVs use SAME parameters
                     device=device,
                     depth=2,  # Deeper network for UAVs
-                    num_cells=256,  # Larger network for UAVs
+                    num_cells=128,
                     activation_class=torch.nn.ReLU,
                 ),
                 NormalParamExtractor(),
@@ -199,7 +199,7 @@ if __name__ == "__main__":
                     share_params=policy_share_params,  # All UGVs use SAME parameters (but different from UAVs)
                     device=device,
                     depth=2,  # Shallower network for UGVs
-                    num_cells=256,  # Smaller network for UGVs
+                    num_cells=128,
                     activation_class=torch.nn.ReLU,  # Different activation
                 ),
                 NormalParamExtractor(),
@@ -238,7 +238,7 @@ if __name__ == "__main__":
                 share_params=True,  # All UAVs use SAME critic parameters
                 device=device,
                 depth=2,
-                num_cells=256,
+                num_cells=128,
                 activation_class=torch.nn.ReLU,
             )
             print(f"  UAV critic parameters: {sum(p.numel() for p in critic_net.parameters())}")
@@ -252,7 +252,7 @@ if __name__ == "__main__":
                 share_params=True,  # All UGVs use SAME critic parameters (but different from UAVs)
                 device=device,
                 depth=2,
-                num_cells=256,
+                num_cells=128,
                 activation_class=torch.nn.ReLU,
             )
             print(f"  UGV critic parameters: {sum(p.numel() for p in critic_net.parameters())}")
