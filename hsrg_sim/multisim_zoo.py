@@ -210,7 +210,7 @@ class Robot:
         x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
             if Robot.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
-                reward -= 0.5  # Penalty for collision with obstacles
+                reward -= 1.0  # Penalty for collision with obstacles
             else:
                 reward = reward
                 
