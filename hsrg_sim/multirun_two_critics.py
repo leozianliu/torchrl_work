@@ -16,7 +16,7 @@ from torchrl.data.replay_buffers.storages import LazyTensorStorage
 # Env
 from torchrl.envs import RewardSum, TransformedEnv, ParallelEnv, EnvCreator
 from torchrl.envs.libs.pettingzoo import PettingZooWrapper
-from torchrl.envs.utils import check_env_specs
+from torchrl.envs.utils import check_env_specs, ExplorationType, set_exploration_type
 
 # Multi-agent network
 from torchrl.modules import MultiAgentMLP, ProbabilisticActor, TanhNormal
@@ -119,6 +119,16 @@ def make_env(worker_id):
         return wrapped_env
     return _make
 
+def make_eval_env(device):
+    env_test = MultiRobotParallelEnv(seed=eval_seed, max_steps=max_steps)
+    group_map_test = create_heterogeneous_group_map(env_test)
+    env_test = PettingZooWrapper(env=env_test, group_map=group_map_test)
+    env_test = TransformedEnv(env_test, reward_transform1.clone())
+    env_test = TransformedEnv(env_test, reward_transform2.clone())
+    env_test = env_test.to(device)
+    env_test.reset()
+    return env_test
+
 # Need to put the main code in __main__ to avoid issues with multiprocessing (main calls itself)
 if __name__ == "__main__":
 
@@ -137,6 +147,9 @@ if __name__ == "__main__":
     # Apply all reward transforms
     env = TransformedEnv(env, reward_transform1)
     env = TransformedEnv(env, reward_transform2)
+    
+    # Create evaluation environment
+    env_test = make_eval_env('cpu')
 
     # print("Environment specs after grouping:")
     # print(f"Observation spec: {env.observation_spec}")
@@ -227,7 +240,6 @@ if __name__ == "__main__":
         )
         
         # CRITIC NETWORK for this group
-        # Key insight: share_params=True means all agents in this group share the SAME critic parameters
         if group_name == "uav":
             # All UAVs share the same critic network parameters
             critic_net = MultiAgentMLP(
@@ -285,7 +297,7 @@ if __name__ == "__main__":
     combined_critic = HeterogeneousCritic(critics)
 
     # print("\nTesting heterogeneous networks:")
-    reset_data = env.reset().to(device)
+    env.reset()
 
     # ==============================================================================
     # TRAINING SETUP WITH PARAMETER SHARING WITHIN GROUPS
@@ -306,7 +318,7 @@ if __name__ == "__main__":
     )
     
     replay_buffer = ReplayBuffer(
-        storage=LazyTensorStorage(frames_per_batch, device='cpu'),
+        storage=LazyTensorStorage(frames_per_batch, device=device),
         sampler=SamplerWithoutReplacement(),
         batch_size=minibatch_size,
     )
@@ -384,11 +396,11 @@ if __name__ == "__main__":
         
         return agent_td
 
-    def train_heterogeneous_agents():
+    def run_training():
         pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
         episode_reward_dict = defaultdict(list)
         
-        for tensordict_data in collector:
+        for iter, tensordict_data in enumerate(collector):
             tensordict_split_dict = {}
             tensordict_split_dict['uav'] = split_tensordict(tensordict_data, 'uav')
             tensordict_split_dict['ugv'] = split_tensordict(tensordict_data, 'ugv')
@@ -414,7 +426,7 @@ if __name__ == "__main__":
             
             # Combine tensordicts for each group into a single tensordict for random minibatch sampling
             data_view = TensorDict(uav=tensordict_split_dict['uav'], ugv=tensordict_split_dict['ugv'], batch_size=[frames_per_batch])
-            replay_buffer.extend(data_view.cpu())
+            replay_buffer.extend(data_view)
             
             # Training epochs
             for epoch in range(num_epochs):           
@@ -465,7 +477,16 @@ if __name__ == "__main__":
             pbar.set_description(f"episode_reward_mean_uav = {episode_reward_dict['uav'][-1]:.2f}   "\
                                  f"episode_reward_mean_ugv = {episode_reward_dict['ugv'][-1]:.2f}", refresh=False)
             pbar.update()
-        
+            
+            if iter % 10 == 0: # Evaluate the policy once every 10 batches of data.
+                with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
+                    test_rollout = env_test.rollout(max_steps=max_steps, policy=combined_policy, auto_cast_to_device=True)
+                    uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
+                    ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
+                    episode_reward_dict['uav_eval'].append(uav_episode_reward)
+                    episode_reward_dict['ugv_eval'].append(ugv_episode_reward)
+                    del test_rollout
+            
         return episode_reward_dict
 
     print("="*80)
@@ -483,24 +504,17 @@ if __name__ == "__main__":
     print("   - All UGV agents share the SAME policy and critic network parameters") 
     
     print("\n2. Starting heterogeneous multi-agent training...")
-    episode_reward_dict = train_heterogeneous_agents()
+    episode_reward_dict = run_training()
     
     print("\n3. TRAINING COMPLETED")
     print("="*80)
     
-    # Demonstrate parameter sharing
-    print("\n4. PARAMETER SHARING VERIFICATION:")
-    env_test = MultiRobotParallelEnv(seed=eval_seed, max_steps=max_steps)
-    group_map_test = create_heterogeneous_group_map(env_test)
-    env_test = PettingZooWrapper(env=env_test, group_map=group_map_test)
-    env_test = TransformedEnv(env_test, reward_transform1.clone()).to('cpu')
-    env_test = TransformedEnv(env_test, reward_transform2.clone()).to('cpu')
-    env_test.reset().to('cpu')
-    
     # Plot results
     plt.figure(figsize=(10, 6))
-    plt.plot(episode_reward_dict['uav'], label='UAV Average Reward')
-    plt.plot(episode_reward_dict['ugv'], label='UGV Average Reward')
+    plt.plot(list(range(1, n_iters+1)), episode_reward_dict['uav'], label='UAV Train Mean Episode Reward')
+    plt.plot(list(range(1, n_iters+1)), episode_reward_dict['ugv'], label='UGV Train Mean Episode Reward')
+    plt.plot(list(range(1, n_iters+1, 10)), episode_reward_dict['uav_eval'], label='UAV Eval Episode Reward')
+    plt.plot(list(range(1, n_iters+1, 10)), episode_reward_dict['ugv_eval'], label='UGV Eval Episode Reward')
     plt.legend()
     plt.xlabel("Training iterations")
     plt.ylabel("Average Episode Reward")
@@ -514,21 +528,21 @@ if __name__ == "__main__":
     
     env_test.start_video_recording('hsrg_sim/marl_simulation.mp4')
     frames = []
-    print("\n5. Rendering rollout for final training evaluation...")
-    with torch.no_grad():
+    print("\n4. Rendering rollout for final training evaluation...")
+    with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
         test_rollout = env_test.rollout(
-                                            max_steps=max_steps,
-                                            policy=combined_policy,
-                                            callback=render_callback,
-                                            auto_cast_to_device=True,
-                                            break_when_any_done=False,
+                                        max_steps=max_steps,
+                                        policy=combined_policy,
+                                        callback=render_callback,
+                                        auto_cast_to_device=True,
+                                        break_when_any_done=False,
                                         )
         
         uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
         ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
         print("="*80)
-        print(f"Episode reward (sum) for UAV: {uav_episode_reward:.2f}")
-        print(f"Episode reward (sum) for UGV: {ugv_episode_reward:.2f}")
+        print(f"Episode reward for UAV: {uav_episode_reward:.2f}")
+        print(f"Episode reward for UGV: {ugv_episode_reward:.2f}")
         print("="*80)
     env_test.stop_video_recording()
     env_test.close()

@@ -2,7 +2,7 @@
 
 train_parameters:
   frames_per_batch: 5000
-  n_iters: 50
+  n_iters: 100
   num_envs: 10
   #total_frames = frames_per_batch * n_iters
 
