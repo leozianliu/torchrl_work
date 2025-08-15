@@ -479,8 +479,8 @@ if __name__ == "__main__":
             pbar.update()
             
             if iter % 10 == 0: # Evaluate the policy once every 10 batches of data.
-                with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
-                    test_rollout = env_test.rollout(max_steps=max_steps, policy=combined_policy, auto_cast_to_device=True)
+                with torch.no_grad():#set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
+                    test_rollout = env_test.rollout(max_steps=max_steps, policy=combined_policy, auto_cast_to_device=True, break_when_all_done=True)
                     uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
                     ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
                     episode_reward_dict['uav_eval'].append(uav_episode_reward)
@@ -511,10 +511,10 @@ if __name__ == "__main__":
     
     # Plot results
     plt.figure(figsize=(10, 6))
-    plt.plot(list(range(1, n_iters+1)), episode_reward_dict['uav'], label='UAV Train Mean Episode Reward')
-    plt.plot(list(range(1, n_iters+1)), episode_reward_dict['ugv'], label='UGV Train Mean Episode Reward')
-    plt.plot(list(range(1, n_iters+1, 10)), episode_reward_dict['uav_eval'], label='UAV Eval Episode Reward')
-    plt.plot(list(range(1, n_iters+1, 10)), episode_reward_dict['ugv_eval'], label='UGV Eval Episode Reward')
+    plt.plot(list(range(0, n_iters)), episode_reward_dict['uav'], label='UAV Train Mean Episode Reward')
+    plt.plot(list(range(0, n_iters)), episode_reward_dict['ugv'], label='UGV Train Mean Episode Reward')
+    plt.plot(list(range(0, n_iters, 10)), episode_reward_dict['uav_eval'], label='UAV Eval Episode Reward')
+    plt.plot(list(range(0, n_iters, 10)), episode_reward_dict['ugv_eval'], label='UGV Eval Episode Reward')
     plt.legend()
     plt.xlabel("Training iterations")
     plt.ylabel("Average Episode Reward")
@@ -529,13 +529,13 @@ if __name__ == "__main__":
     env_test.start_video_recording('hsrg_sim/marl_simulation.mp4')
     frames = []
     print("\n4. Rendering rollout for final training evaluation...")
-    with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
+    with torch.no_grad():#set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
         test_rollout = env_test.rollout(
                                         max_steps=max_steps,
                                         policy=combined_policy,
                                         callback=render_callback,
                                         auto_cast_to_device=True,
-                                        break_when_any_done=False,
+                                        break_when_all_done=True
                                         )
         
         uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()

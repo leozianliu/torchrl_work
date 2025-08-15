@@ -203,16 +203,19 @@ class Robot:
             reward = reward
         else:
             delta_dist = self.dist_to_goal_prev - dist_to_goal
-            reward += delta_dist * np.linalg.norm((MAP_SIZE[0], MAP_SIZE[1])) / (self.dist_to_goal_prev + 1)#* 1
+            reward += delta_dist * np.linalg.norm((MAP_SIZE[0], MAP_SIZE[1])) / (self.dist_to_goal_prev + 1e-3)
         self.dist_to_goal_prev = dist_to_goal  # Update for next step
         
         # Collision penalty
         x, y = self.pos[0], self.pos[1]
         if 0 <= x < MAP_SIZE[0] and 0 <= y < MAP_SIZE[1]:
             if Robot.check_obstacle_collision(self.next_pos, obstacles, robot_clearance=1.0) and self.type == 'UGV':
-                reward -= 5.0  # Penalty for collision with obstacles
+                reward -= 10.0  # Penalty for collision with obstacles
             else:
                 reward = reward
+                
+        # Move around reward
+
                 
         # # Inter-robot distance penalty
         # interdist_reward = calculate_total_interdist_reward(robots)

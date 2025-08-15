@@ -31,7 +31,7 @@ general_inputs:
   num_obstacles: 200
   obstacles_size_range: [6, 12] # Range of obstacle sizes
   max_neighbors: 0 # Maximum number of neighbors each robot could observe
-  view_range_ugv: 5
+  view_range_ugv: 30
   view_range_uav: 30
 
 robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
