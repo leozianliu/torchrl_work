@@ -466,15 +466,15 @@ if __name__ == "__main__":
             # Logging - aggregate rewards across all groups
             for group_name in group_map.keys():
                 episode_reward_key = (group_name, "episode_reward")
-                done_key = ("next", group_name, "done")
+                # done_key = ("next", group_name, "done")
                 
-                if done_key in tensordict_data.keys(True) and episode_reward_key in tensordict_data.keys(True):
-                    done = tensordict_data.get(done_key)
-                    group_episode_reward = tensordict_data.get(episode_reward_key)[done]
+                if episode_reward_key in tensordict_data.keys(True): #done_key in tensordict_data.keys(True) and episode_reward_key in tensordict_data.keys(True):
+                    #done = tensordict_data.get(done_key)
+                    group_episode_reward = tensordict_data.get(episode_reward_key)[-1] # -1 to get the last episode_reward and average across all agents
                     if group_episode_reward.numel() > 0:
-                        group_episode_reward_mean = group_episode_reward.mean().item()
+                        group_episode_reward_mean = group_episode_reward.mean().item() # Average across all envs AND agents
+                        episode_reward_dict[group_name].append(group_episode_reward_mean)
                 
-                episode_reward_dict[group_name].append(group_episode_reward_mean)
             pbar.set_description(f"episode_reward_mean_uav = {episode_reward_dict['uav'][-1]:.2f}   "\
                                  f"episode_reward_mean_ugv = {episode_reward_dict['ugv'][-1]:.2f}", refresh=False)
             pbar.update()
@@ -482,10 +482,15 @@ if __name__ == "__main__":
             if iter % 10 == 0: # Evaluate the policy once every 10 batches of data.
                 with torch.no_grad():#set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
                     test_rollout = env_test.rollout(max_steps=max_steps, policy=combined_policy, auto_cast_to_device=True, break_when_all_done=True)
-                    uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
-                    ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
-                    episode_reward_dict['uav_eval'].append(uav_episode_reward)
-                    episode_reward_dict['ugv_eval'].append(ugv_episode_reward)
+                    for group_name in group_map.keys():
+                        episode_reward_key = (group_name, "episode_reward")
+                        # done_key = ("next", group_name, "done")
+                        if episode_reward_key in test_rollout.keys(True): #done_key in test_rollout.keys(True) and episode_reward_key in test_rollout.keys(True):
+                            # done = test_rollout.get(done_key)
+                            group_episode_reward = test_rollout.get(episode_reward_key)[-1] # -1 to get the last episode_reward and average across all agents
+                            if group_episode_reward.numel() > 0:
+                                group_episode_reward_eval = group_episode_reward.mean().item()
+                                episode_reward_dict[f'{group_name}_eval'].append(group_episode_reward_eval)
                     del test_rollout
             
         return episode_reward_dict
@@ -539,8 +544,8 @@ if __name__ == "__main__":
                                         break_when_all_done=True
                                         )
         
-        uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")].mean().item()
-        ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")].mean().item()
+        uav_episode_reward = test_rollout[('next', 'uav', "episode_reward")][-1].mean().item()
+        ugv_episode_reward = test_rollout[('next', 'ugv', "episode_reward")][-1].mean().item()
         print("="*80)
         print(f"Episode reward for UAV: {uav_episode_reward:.2f}")
         print(f"Episode reward for UGV: {ugv_episode_reward:.2f}")
