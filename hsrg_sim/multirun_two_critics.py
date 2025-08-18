@@ -110,7 +110,7 @@ def create_heterogeneous_group_map(env):
 group_map = None
 def make_env(worker_id):
     def _make():
-        env_seed = rng_seed + worker_id
+        env_seed = rng_seed + worker_id * 100 # Each env gets a different rng seed
         single_env = MultiRobotParallelEnv(seed=env_seed, max_steps=max_steps)
         global group_map
         if group_map is None:
@@ -400,6 +400,7 @@ if __name__ == "__main__":
         pbar = tqdm(total=n_iters, desc="episode_reward_mean = 0")
         episode_reward_dict = defaultdict(list)
         
+        # Rollout of each batch iteration
         for iter, tensordict_data in enumerate(collector):
             tensordict_split_dict = {}
             tensordict_split_dict['uav'] = split_tensordict(tensordict_data, 'uav')

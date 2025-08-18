@@ -2,7 +2,7 @@
 
 train_parameters:
   frames_per_batch: 5000
-  n_iters: 100
+  n_iters: 50
   num_envs: 10
   #total_frames = frames_per_batch * n_iters
 
@@ -23,7 +23,7 @@ train_parameters:
   entropy_eps: !!float 5e-4
 
   # Seeding
-  rng_seed: 42 # Base seed for creating the environment, reset() will continue drawing from the same RNG sequence across episodes
+  rng_seed: 20 # Base seed for creating the environment, reset() will continue drawing from the same RNG sequence across episodes
   eval_seed: 10 # Seed for evaluation runs, to ensure reproducibility
 
 general_inputs:
@@ -31,7 +31,7 @@ general_inputs:
   num_obstacles: 200
   obstacles_size_range: [6, 12] # Range of obstacle sizes
   max_neighbors: 0 # Maximum number of neighbors each robot could observe
-  view_range_ugv: 30
+  view_range_ugv: 5
   view_range_uav: 30
 
 robots: # Either [type] or [type, pos, goal] or [type, pos, goal, bat, comm]
