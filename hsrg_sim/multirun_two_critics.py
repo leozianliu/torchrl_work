@@ -27,10 +27,10 @@ from torchrl.objectives import ClipPPOLoss, LossModule, ValueEstimators
 # Utils
 from matplotlib import pyplot as plt
 from tqdm import tqdm
+import numpy as np
+from collections import defaultdict
 
 from multisim_zoo import MultiRobotParallelEnv, Helper
-
-from collections import defaultdict
 
 # Devices
 is_fork = multiprocessing.get_start_method() == "fork"
@@ -473,10 +473,14 @@ if __name__ == "__main__":
                     group_episode_reward = tensordict_data.get(episode_reward_key)[-1] # -1 to get the last episode_reward and average across all agents
                     if group_episode_reward.numel() > 0:
                         group_episode_reward_mean = group_episode_reward.mean().item() # Average across all envs AND agents
-                        episode_reward_dict[group_name].append(group_episode_reward_mean)
+                        group_episode_reward_25 = np.percentile(group_episode_reward.cpu().numpy(), 25)  # 25th percentile
+                        group_episode_reward_75 = np.percentile(group_episode_reward.cpu().numpy(), 75)  # 75th percentile
+                        episode_reward_dict[f'{group_name}_train_mean'].append(group_episode_reward_mean)
+                        episode_reward_dict[f'{group_name}_train_25'].append(group_episode_reward_25)
+                        episode_reward_dict[f'{group_name}_train_75'].append(group_episode_reward_75)
                 
-            pbar.set_description(f"episode_reward_mean_uav = {episode_reward_dict['uav'][-1]:.2f}   "\
-                                 f"episode_reward_mean_ugv = {episode_reward_dict['ugv'][-1]:.2f}", refresh=False)
+            pbar.set_description(f"episode_reward_mean_uav = {episode_reward_dict['uav_train_mean'][-1]:.2f}   "\
+                                 f"episode_reward_mean_ugv = {episode_reward_dict['ugv_train_mean'][-1]:.2f}", refresh=False)
             pbar.update()
             
             if iter % 10 == 0: # Evaluate the policy once every 10 batches of data.
@@ -517,8 +521,16 @@ if __name__ == "__main__":
     
     # Plot results
     plt.figure(figsize=(10, 6))
-    plt.plot(list(range(0, n_iters)), episode_reward_dict['uav'], label='UAV Train Mean Episode Reward')
-    plt.plot(list(range(0, n_iters)), episode_reward_dict['ugv'], label='UGV Train Mean Episode Reward')
+    plt.plot(list(range(0, n_iters)), episode_reward_dict['uav_train_mean'], label='UAV Train Mean Episode Reward')
+    plt.fill_between(list(range(0, n_iters)), 
+                     episode_reward_dict['uav_train_25'], 
+                     episode_reward_dict['uav_train_75'], 
+                     alpha=0.2, label='UAV Train Reward IQR')
+    plt.plot(list(range(0, n_iters)), episode_reward_dict['ugv_train_mean'], label='UGV Train Mean Episode Reward')
+    plt.fill_between(list(range(0, n_iters)), 
+                     episode_reward_dict['ugv_train_25'], 
+                     episode_reward_dict['ugv_train_75'], 
+                     alpha=0.2, label='UGV Train Reward IQR')
     plt.plot(list(range(0, n_iters, 10)), episode_reward_dict['uav_eval'], label='UAV Eval Episode Reward')
     plt.plot(list(range(0, n_iters, 10)), episode_reward_dict['ugv_eval'], label='UGV Eval Episode Reward')
     plt.legend()
